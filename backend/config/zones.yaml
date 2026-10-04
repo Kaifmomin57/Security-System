@@ -1,0 +1,56 @@
+cameras:
+  - id: cam_01
+    name: Main Entrance
+    source: ./media/test_cctv.mp4   # replace with RTSP URL for live camera
+
+    zones:
+      - id: zone_entrance
+        name: Entrance Lobby
+        polygon:
+          - [100, 200]
+          - [540, 200]
+          - [540, 450]
+          - [100, 450]
+        rules:
+          - type: loitering
+            threshold_seconds: 60
+            enabled: true
+          - type: intrusion
+            active_hours: "22:00-06:00"
+            enabled: true
+
+      - id: zone_atm
+        name: ATM Area
+        polygon:
+          - [300, 100]
+          - [580, 100]
+          - [580, 380]
+          - [300, 380]
+        rules:
+          - type: loitering
+            threshold_seconds: 30
+            enabled: true
+          - type: crowd
+            max_persons: 3
+            enabled: true
+
+    trailing:
+      duration_threshold: 45       # seconds person B must follow person A
+      max_ambient_persons: 4       # only flag if area is low-traffic
+      min_follow_distance: 40      # pixels minimum following distance
+      max_follow_distance: 200     # pixels maximum following distance
+
+    # Feature A: Abandoned / Unaccompanied Person Detection
+    unaccompanied:
+      enabled: true
+      threshold_seconds: 45        # seconds small-stature person is alone without adult
+      proximity_radius_px: 150     # max distance in pixels to count as accompanied
+      adult_height_px: 160         # baseline adult height reference at standard depth
+      small_stature_ratio: 0.68    # < 68% height classified as small-stature proxy
+
+    # Feature B: Sound-Based Distress Detection
+    audio_distress:
+      enabled: true
+      confidence_threshold: 0.55
+      sample_rate: 16000
+      temporal_smoothing_windows: 3 # 2 of 3 consecutive windows

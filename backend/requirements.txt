@@ -1,0 +1,43 @@
+# ─── Install PyTorch with CUDA FIRST (before pip install -r requirements.txt) ───
+# Python 3.13 + GTX 1650 (driver 580.x) → use cu126:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+#
+# Older driver / CUDA 12.1 only:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Detection & Vision
+ultralytics>=8.0.0       # YOLOv8 (auto-uses GPU if torch+CUDA installed)
+opencv-python>=4.8.0     # video frame reading, drawing overlays
+mediapipe>=0.10.0        # pose estimation for fall/fight detection
+
+# Tracking
+deep-sort-realtime>=1.3.2
+
+# Backend
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+websockets>=12.0
+
+# Telegram alerts
+python-telegram-bot>=20.0
+
+# Config / secrets
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# Database — PostgreSQL
+sqlalchemy>=2.0.0
+psycopg[binary]>=3.1.0   # psycopg3 — used by SQLAlchemy 2.x by default
+psycopg2-binary>=2.9.9   # psycopg2 — fallback
+alembic>=1.13.0
+asyncpg>=0.29.0
+
+# Async file I/O
+aiofiles>=23.0
+
+# Utilities
+numpy>=1.24.0
+pillow>=10.0.0
+shapely>=2.0.0           # polygon math for zone detection
+scipy>=1.11.0            # stats for adaptive baseline
