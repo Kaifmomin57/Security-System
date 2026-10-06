@@ -235,12 +235,87 @@ class TrackClassification(Base):
 class UnaccompaniedEvent(Base):
     __tablename__ = "unaccompanied_events"
 
-    id                      = Column(Integer, primary_key=True, autoincrement=True)
+    id                      = Column(String, primary_key=True, default=lambda: f"una_{uuid.uuid4().hex[:8]}")
     event_id                = Column(String, ForeignKey("events.id"), nullable=True)
     track_id                = Column(Integer, nullable=False)
     last_adult_seen_at      = Column(DateTime, nullable=True)
     duration_alone_seconds  = Column(Integer, nullable=False)
     created_at              = Column(DateTime, default=datetime.utcnow)
+
+
+class TrailingEvent(Base):
+    __tablename__ = "trailing_events"
+
+    id                  = Column(String, primary_key=True, default=lambda: f"trl_{uuid.uuid4().hex[:8]}")
+    event_id            = Column(String, ForeignKey("events.id"), nullable=True)
+    track_id_follower   = Column(Integer, nullable=False)
+    track_id_followed   = Column(Integer, nullable=False)
+    duration_seconds    = Column(Float, nullable=False)
+    avg_distance        = Column(Float, nullable=False)
+    ambient_count       = Column(Integer, default=1)
+    confidence          = Column(Float, nullable=False)
+    timestamp           = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class GestureEvent(Base):
+    __tablename__ = "gesture_events"
+
+    id              = Column(String, primary_key=True, default=lambda: f"ges_{uuid.uuid4().hex[:8]}")
+    event_id        = Column(String, ForeignKey("events.id"), nullable=True)
+    track_id        = Column(Integer, nullable=False)
+    camera_id       = Column(String, nullable=False)
+    gesture_type    = Column(String, default="signal_for_help")
+    confidence      = Column(Float, nullable=False)
+    timestamp       = Column(DateTime, default=datetime.utcnow, index=True)
+    snapshot_path   = Column(String, nullable=True)
+
+
+class ReidGallery(Base):
+    __tablename__ = "reid_gallery"
+
+    id                  = Column(String, primary_key=True, default=lambda: f"gal_{uuid.uuid4().hex[:8]}")
+    track_id            = Column(Integer, nullable=False, index=True)
+    camera_id           = Column(String, nullable=False)
+    embedding_vector    = Column(JSONB, nullable=False) # list of floats
+    last_seen_at        = Column(DateTime, default=datetime.utcnow, index=True)
+    snapshot_path       = Column(String, nullable=True)
+
+
+class ReidMatch(Base):
+    __tablename__ = "reid_matches"
+
+    id                      = Column(String, primary_key=True, default=lambda: f"rem_{uuid.uuid4().hex[:8]}")
+    original_track_id       = Column(Integer, nullable=False, index=True)
+    matched_track_id        = Column(Integer, nullable=False)
+    camera_id_matched       = Column(String, nullable=False)
+    similarity_score        = Column(Float, nullable=False)
+    confirmed_by_operator   = Column(Boolean, nullable=True, default=None) # None = unconfirmed, True = confirmed, False = rejected
+    timestamp               = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class WeaponEvent(Base):
+    __tablename__ = "weapon_events"
+
+    id              = Column(String, primary_key=True, default=lambda: f"wep_{uuid.uuid4().hex[:8]}")
+    event_id        = Column(String, ForeignKey("events.id"), nullable=True)
+    track_id        = Column(Integer, nullable=True)
+    weapon_class    = Column(String, nullable=False) # pistol / knife / gun
+    confidence      = Column(Float, nullable=False)
+    camera_id       = Column(String, nullable=False)
+    is_reviewed     = Column(Boolean, default=False)
+    timestamp       = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class AbandonedObjectEvent(Base):
+    __tablename__ = "abandoned_object_events"
+
+    id                  = Column(String, primary_key=True, default=lambda: f"abn_{uuid.uuid4().hex[:8]}")
+    event_id            = Column(String, ForeignKey("events.id"), nullable=True)
+    object_track_id     = Column(Integer, nullable=False)
+    object_class        = Column(String, nullable=False) # backpack / suitcase / handbag
+    duration_unattended = Column(Float, nullable=False)
+    camera_id           = Column(String, nullable=False)
+    timestamp           = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 class AudioEvent(Base):

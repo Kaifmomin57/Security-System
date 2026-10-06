@@ -75,16 +75,30 @@ class TrailingRule(BaseRule):
         duration_threshold: float,
     ) -> RuleResult | None:
         """
-        Check if track_b is consistently following track_a.
-        Returns a RuleResult if trailing is confirmed, else None.
+        Check if track_b is consistently moving and following track_a.
+        Returns a RuleResult if genuine trailing is confirmed, else None.
         """
         traj_a = list(track_a.trajectory)
         traj_b = list(track_b.trajectory)
 
         if len(traj_a) < 4 or len(traj_b) < 4:
-            return None  # Not enough history yet
+            return None  # Not enough trajectory history yet
 
-        # Align trajectories by timestamp
+        # ── 1. Movement Check: Both tracks must have actual displacement (not stationary) ──
+        disp_a = self._euclidean(traj_a[0].x, traj_a[0].y, traj_a[-1].x, traj_a[-1].y)
+        disp_b = self._euclidean(traj_b[0].x, traj_b[0].y, traj_b[-1].x, traj_b[-1].y)
+        if disp_a < 30.0 or disp_b < 30.0:
+            return None  # Stationary / sitting still — not trailing
+
+        # ── 2. Directional Alignment (Cosine Similarity of vectors) ───────────
+        dx_a, dy_a = (traj_a[-1].x - traj_a[0].x), (traj_a[-1].y - traj_a[0].y)
+        dx_b, dy_b = (traj_b[-1].x - traj_b[0].x), (traj_b[-1].y - traj_b[0].y)
+        dot_prod = dx_a * dx_b + dy_a * dy_b
+        cos_sim = dot_prod / (disp_a * disp_b + 1e-6)
+        if cos_sim < 0.50:
+            return None  # Different movement directions — not following
+
+        # ── 3. Align trajectories by timestamp ────────────────────────────────
         aligned = self._align_trajectories(traj_a, traj_b)
         if len(aligned) < 3:
             return None
@@ -99,16 +113,16 @@ class TrailingRule(BaseRule):
         in_range_count = sum(1 for d in distances if min_dist <= d <= max_dist)
         in_range_ratio = in_range_count / len(distances)
 
-        # Require at least 50% of aligned points to be in range
-        if in_range_ratio < 0.50:
+        # Require at least 60% of aligned points to maintain following distance
+        if in_range_ratio < 0.60:
             return None
 
-        # Check if this condition has been sustained for long enough
-        first_ts = traj_a[0].timestamp if hasattr(traj_a[0], "timestamp") else time.time() - 60
-        last_ts  = traj_a[-1].timestamp if hasattr(traj_a[-1], "timestamp") else time.time()
-        sustained_seconds = max(0.5, last_ts - first_ts)
+        # ── 4. Sustained Duration Check ───────────────────────────────────────
+        first_ts = max(traj_a[0].timestamp, traj_b[0].timestamp) if hasattr(traj_a[0], "timestamp") else time.time() - 60
+        last_ts  = min(traj_a[-1].timestamp, traj_b[-1].timestamp) if hasattr(traj_a[-1], "timestamp") else time.time()
+        sustained_seconds = max(0.1, last_ts - first_ts)
 
-        if sustained_seconds < duration_threshold and len(traj_a) < 8:
+        if sustained_seconds < duration_threshold:
             return None
 
         confidence = self._score_confidence(sustained_seconds, duration_threshold, in_range_ratio)
@@ -124,6 +138,7 @@ class TrailingRule(BaseRule):
                 "sustained_seconds": round(sustained_seconds, 1),
                 "avg_distance_px": round(sum(distances) / len(distances), 1),
                 "in_range_ratio": round(in_range_ratio, 2),
+                "direction_similarity": round(cos_sim, 2),
                 "trajectory_a": [
                     {"t": p.timestamp, "x": p.x, "y": p.y}
                     for p in traj_a[-20:]
@@ -161,6 +176,6 @@ class TrailingRule(BaseRule):
     def _score_confidence(
         self, duration: float, threshold: float, ratio: float
     ) -> float:
-        duration_score = min((duration - threshold) / threshold, 1.0) * 0.5
-        ratio_score = (ratio - 0.70) / 0.30 * 0.5
-        return self._clamp_confidence(0.4 + duration_score + ratio_score)
+        duration_score = min((duration - threshold) / max(threshold, 0.1), 1.0) * 0.5
+        ratio_score = (ratio - 0.60) / 0.40 * 0.5
+        return self._clamp_confidence(0.5 + duration_score + ratio_score)

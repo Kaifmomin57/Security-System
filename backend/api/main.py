@@ -27,6 +27,7 @@ from api.routes_reports   import router as reports_router
 from api.routes_watchlist import router as watchlist_router
 from api.routes_evidence  import router as evidence_router
 from api.routes_traffic   import router as traffic_router
+from api.routes_reid      import router as reid_router
 from api.websocket_manager import ws_manager
 from storage.db import create_tables
 
@@ -82,6 +83,8 @@ app.include_router(reports_router,   prefix=PREFIX)
 app.include_router(watchlist_router, prefix=PREFIX)
 app.include_router(evidence_router,  prefix=PREFIX)
 app.include_router(traffic_router,   prefix=PREFIX)
+app.include_router(reid_router,      prefix=PREFIX)
+app.include_router(reid_router)  # Also supports direct /reid routes per PRD spec
 
 
 # ─── WebSocket endpoint ───────────────────────────────────────────────────────

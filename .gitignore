@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/venv/
+backend/.venv/
+env/
+venv/
+ENV/
+
+# Environment Variables
+.env
+backend/.env
+
+# Large Models & Weights (Keep repo lightweight)
+*.pt
+*.onnx
+*.engine
+
+# Generated Media & Logs
+backend/media/clips/
+backend/media/snapshots/
+backend/media/reports/
+backend/media/reid_gallery/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.log

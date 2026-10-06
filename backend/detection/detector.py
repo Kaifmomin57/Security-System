@@ -1,7 +1,8 @@
 """
 detection/detector.py
 ─────────────────────
-YOLOv8 wrapper for person + object detection.
+YOLO wrapper for person + object detection.
+Only detects classes relevant to SentryEye safety features.
 Runs on CUDA (GTX 1650) by default.
 """
 
@@ -14,15 +15,24 @@ from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
 
-# Classes we care about from COCO dataset
+# ─── Classes relevant to SentryEye safety features only ─────────────────────
 COCO_CLASSES_OF_INTEREST = {
+    # Feature 1, 2, 3, 4: People & Vehicles
     0:  "person",
+    2:  "car",
+    3:  "motorcycle",
+    5:  "bus",
+    7:  "truck",
+
+    # Feature 5.2: Bags & Luggage (Abandoned Objects)
     24: "backpack",
     26: "handbag",
     28: "suitcase",
-    39: "bottle",
-    67: "cell phone",
-    73: "laptop",
+
+    # Feature 5.1: Weapons & Tools
+    43: "knife",
+    76: "scissors",
+    34: "baseball bat",
 }
 
 

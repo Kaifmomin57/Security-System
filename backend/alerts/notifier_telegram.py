@@ -50,8 +50,8 @@ async def send_alert(
 
     Returns True on success, False on failure.
     """
-    if not BOT_TOKEN or not CHAT_ID:
-        logger.warning("Telegram credentials not configured — skipping notification.")
+    if not BOT_TOKEN or not CHAT_ID or "your_bot_token" in BOT_TOKEN:
+        logger.debug("Telegram credentials not configured — skipping notification.")
         return False
 
     emoji   = SEVERITY_EMOJI.get(severity, "⚠️")

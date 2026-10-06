@@ -13,7 +13,7 @@ import logging
 import os
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import cv2
 import yaml
@@ -26,9 +26,13 @@ from rules.loitering_rule     import LoiteringRule
 from rules.trailing_rule      import TrailingRule
 from rules.zone_intrusion_rule import ZoneIntrusionRule
 from rules.unaccompanied_person_rule import UnaccompaniedPersonRule
+from rules.gesture_rule       import DistressGestureRule
+from rules.weapon_rule        import WeaponDetectionRule
+from rules.abandoned_object_rule import AbandonedObjectRule
 from rules.traffic_violation_rule import TrafficViolationRule
 from rules.hit_and_run_rule   import HitAndRunRule
 from detection.anpr_engine    import anpr_engine
+from detection.reid_engine    import reid_engine
 from rules.fusion             import FusionEngine
 from audio.distress_detector  import AudioDistressDetector
 from alerts.severity          import score_severity
@@ -39,7 +43,9 @@ from privacy.face_blur        import FaceBlur
 from storage.db               import (
     create_tables, get_session, Event, Camera,
     TrackClassification, UnaccompaniedEvent, AudioEvent,
-    TrafficViolation, CollisionEvent, PlateRead
+    TrafficViolation, CollisionEvent, PlateRead,
+    TrailingEvent, GestureEvent, WeaponEvent, AbandonedObjectEvent,
+    ReidGallery, ReidMatch
 )
 from storage.clip_saver       import ClipSaver
 from api.main                 import pipeline_status
@@ -98,22 +104,55 @@ def load_zones_config(camera_id: str) -> dict:
     return {}
 
 
-def draw_overlays(frame, tracks, active_alerts):
-    """Draw bounding boxes, track IDs, and alert indicators on the frame."""
+def draw_overlays(frame, tracks, active_alerts, raw_detections=None):
+    """Draw bounding boxes, track IDs, object labels, and alert indicators on the frame."""
+    # 1. Draw raw detected objects (weapons, bags, everyday items)
+    if raw_detections:
+        for det in raw_detections:
+            cls_name = getattr(det, "class_name", "object")
+            conf = getattr(det, "confidence", 0.0)
+            bbox = getattr(det, "bbox", [0, 0, 0, 0])
+            x1, y1, x2, y2 = [int(v) for v in bbox]
+
+            if cls_name == "person":
+                continue  # Persons rendered with Track IDs below
+
+            # Color coding: Weapons (Red), Bags (Yellow)
+            if cls_name in ("knife", "gun", "scissors", "baseball bat"):
+                color = (0, 0, 255)  # Red for weapons
+                label = f"⚠️ {cls_name.upper()} {int(conf * 100)}%"
+            elif cls_name in ("backpack", "handbag", "suitcase"):
+                color = (0, 215, 255)  # Gold/Yellow for bags
+                label = f"{cls_name} {int(conf * 100)}%"
+            else:
+                color = (0, 255, 255)
+                label = f"{cls_name} {int(conf * 100)}%"
+
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+            cv2.rectangle(frame, (x1, max(0, y1 - 18)), (x1 + tw + 6, max(0, y1)), color, -1)
+            cv2.putText(frame, label, (x1 + 3, max(12, y1 - 4)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
+
+    # 2. Draw person / vehicle tracks
     for track in tracks:
         x1, y1, x2, y2 = [int(v) for v in track.bbox]
         color = (0, 255, 0)  # green = normal
 
         # Red for tracks involved in active alerts
+        is_alert = False
         for alert in active_alerts:
             if track.track_id in alert.get("track_ids", []):
                 color = (0, 0, 255)
+                is_alert = True
                 break
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        label = f"ID:{track.track_id} {track.class_name}"
-        cv2.putText(frame, label, (x1, y1 - 8),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        label = f"ID:{track.track_id} {track.class_name}" + (" [ALERT]" if is_alert else "")
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.rectangle(frame, (x1, max(0, y1 - 20)), (x1 + tw + 6, max(0, y1)), color, -1)
+        cv2.putText(frame, label, (x1 + 3, max(14, y1 - 5)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0) if not is_alert else (255, 255, 255), 1, cv2.LINE_AA)
     return frame
 
 
@@ -178,11 +217,11 @@ async def save_and_notify(
             clip_path     = "",
             clip_hash     = "",
             explanation   = metadata,
-            timestamp     = datetime.utcnow(),
+            timestamp     = datetime.now(timezone.utc),
         )
         db.add(event)
 
-        # ── Feature A: Unaccompanied Person Record in DB ─────────────────────
+        # ── Feature 1: Unaccompanied Person Record in DB ─────────────────────
         if result.rule_type == "unaccompanied_person":
             for tid in result.track_ids:
                 try:
@@ -200,6 +239,75 @@ async def save_and_notify(
                 except Exception as e:
                     logger.debug(f"Could not write unaccompanied details: {e}")
 
+        # ── Feature 2: Trailing Event Record in DB & Active Re-ID Gallery ───
+        if result.rule_type == "trailing":
+            try:
+                follower_id = metadata.get("follower_id", result.track_ids[0] if result.track_ids else 0)
+                followed_id = metadata.get("followed_id", result.track_ids[1] if len(result.track_ids) > 1 else 0)
+                db.add(TrailingEvent(
+                    id=f"trl_{uuid.uuid4().hex[:8]}",
+                    event_id=event_id,
+                    track_id_follower=follower_id,
+                    track_id_followed=followed_id,
+                    duration_seconds=metadata.get("duration_seconds", 0.0),
+                    avg_distance=metadata.get("avg_distance", 0.0),
+                    ambient_count=metadata.get("ambient_count", 1),
+                    confidence=result.confidence,
+                    timestamp=datetime.now(timezone.utc),
+                ))
+                # Add follower to active Re-ID gallery for cross-camera correlation
+                if frame is not None and frame.size > 0:
+                    reid_engine.add_to_active_gallery(follower_id, CAMERA_ID, frame)
+            except Exception as e:
+                logger.debug(f"Could not write trailing event: {e}")
+
+        # ── Feature 3: Gesture Event Record in DB ────────────────────────────
+        if result.rule_type == "signal_for_help":
+            try:
+                db.add(GestureEvent(
+                    id=f"ges_{uuid.uuid4().hex[:8]}",
+                    event_id=event_id,
+                    track_id=result.track_ids[0] if result.track_ids else 0,
+                    camera_id=CAMERA_ID,
+                    confidence=result.confidence,
+                    gesture_type=metadata.get("gesture_type", "signal_for_help"),
+                    snapshot_path=snapshot_path,
+                    timestamp=datetime.now(timezone.utc),
+                ))
+            except Exception as e:
+                logger.debug(f"Could not write gesture event: {e}")
+
+        # ── Feature 5.1: Weapon Event Record in DB ───────────────────────────
+        if result.rule_type == "possible_weapon":
+            try:
+                db.add(WeaponEvent(
+                    id=f"wep_{uuid.uuid4().hex[:8]}",
+                    event_id=event_id,
+                    track_id=result.track_ids[0] if result.track_ids else None,
+                    weapon_class=metadata.get("weapon_class", "weapon"),
+                    confidence=result.confidence,
+                    camera_id=CAMERA_ID,
+                    is_reviewed=False,
+                    timestamp=datetime.now(timezone.utc),
+                ))
+            except Exception as e:
+                logger.debug(f"Could not write weapon event: {e}")
+
+        # ── Feature 5.2: Abandoned Object Event Record in DB ─────────────────
+        if result.rule_type == "abandoned_object":
+            try:
+                db.add(AbandonedObjectEvent(
+                    id=f"abn_{uuid.uuid4().hex[:8]}",
+                    event_id=event_id,
+                    object_track_id=metadata.get("object_track_id", result.track_ids[0] if result.track_ids else 0),
+                    object_class=metadata.get("object_class", "backpack"),
+                    duration_unattended=metadata.get("duration_unattended_seconds", 0.0),
+                    camera_id=CAMERA_ID,
+                    timestamp=datetime.now(timezone.utc),
+                ))
+            except Exception as e:
+                logger.debug(f"Could not write abandoned object event: {e}")
+
         # ── Feature 5: Traffic Violation Record in DB ─────────────────────────
         if result.rule_type in ("signal_jump", "wrong_side"):
             try:
@@ -212,7 +320,7 @@ async def save_and_notify(
                     signal_state=metadata.get("signal_state"),
                     lane_id=metadata.get("lane_id"),
                     speed_estimate_kmh=metadata.get("speed_estimate_kmh"),
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                 ))
             except Exception as e:
                 logger.debug(f"Could not write traffic violation: {e}")
@@ -228,7 +336,7 @@ async def save_and_notify(
                     plate_number=metadata.get("plate_number"),
                     collision_speed_drop=metadata.get("collision_speed_drop", 0.65),
                     fleeing_velocity=metadata.get("fleeing_velocity_px", 18.0),
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                 ))
             except Exception as e:
                 logger.debug(f"Could not write collision event: {e}")
@@ -260,7 +368,7 @@ async def save_and_notify(
             "status":      "new",
             "track_ids":   result.track_ids,
             "snapshot_url": f"/media/snapshots/{os.path.basename(snapshot_path)}" if snapshot_path else None,
-            "timestamp":   datetime.utcnow().isoformat(),
+            "timestamp":   datetime.now(timezone.utc).isoformat(),
             "explanation": metadata,
         })
 
@@ -302,10 +410,13 @@ async def run_pipeline():
     rules          = [
         LoiteringRule(),
         ZoneIntrusionRule(),
-        TrailingRule(),
-        UnaccompaniedPersonRule(), # Feature A: Abandoned/Lost Person Detection
-        TrafficViolationRule(),    # Feature 5: Signal Jump & Wrong-Way
-        HitAndRunRule(),           # Feature 6: Hit & Run Collision
+        TrailingRule(),             # Feature 2: Trailing / Stalking Pattern Detection (gender-neutral)
+        UnaccompaniedPersonRule(),  # Feature 1: Unaccompanied Child / Lost Person Detection
+        DistressGestureRule(),      # Feature 3: Signal-for-Help Hand Gesture Detection
+        WeaponDetectionRule(),      # Feature 5.1: Weapon & Threatening Object Detection
+        AbandonedObjectRule(),      # Feature 5.2: Abandoned & Suspicious Object Detection
+        TrafficViolationRule(),     # Traffic Violation Detection
+        HitAndRunRule(),            # Hit & Run Collision
     ]
     fusion         = FusionEngine(n_required=N_SMOOTH, m_window=M_SMOOTH, cooldown_secs=COOLDOWN)
     clip_saver     = ClipSaver(output_dir=MEDIA_DIR, camera_id=CAMERA_ID)
@@ -335,6 +446,13 @@ async def run_pipeline():
 
             # ── Detection + Tracking ─────────────────────────────────────────
             detections = detector.detect(frame)
+            try:
+                from detection.weapon_detector import weapon_detector
+                weapon_dets = weapon_detector.detect(frame) if weapon_detector else []
+            except Exception:
+                weapon_dets = []
+            all_detections = detections + weapon_dets
+
             tracks     = tracker.update(detections, frame, frame_idx, timestamp)
 
             # ── Feed rolling clip buffer ─────────────────────────────────────
@@ -370,9 +488,14 @@ async def run_pipeline():
                             )
 
             # ── Rule evaluation ───────────────────────────────────────────────
+            eval_config = dict(cam_config)
+            eval_config["current_frame"] = frame
+            eval_config["raw_detections"] = all_detections
+            eval_config["camera_id"] = CAMERA_ID
+
             raw_results = []
             for rule in rules:
-                raw_results.extend(rule.evaluate(tracks, cam_config))
+                raw_results.extend(rule.evaluate(tracks, eval_config))
 
             # ── Temporal smoothing + fusion ───────────────────────────────────
             confirmed = fusion.process(raw_results, CAMERA_ID)
@@ -399,7 +522,7 @@ async def run_pipeline():
                 )
 
             # ── Draw overlays and display (remove for headless / server mode) ─
-            annotated = draw_overlays(frame.copy(), tracks, active_alert_data)
+            annotated = draw_overlays(frame.copy(), tracks, active_alert_data, raw_detections=all_detections)
             cv2.imshow(f"SentryEye — {CAMERA_NAME}", annotated)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 logger.info("User quit.")

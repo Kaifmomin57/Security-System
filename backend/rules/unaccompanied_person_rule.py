@@ -207,7 +207,8 @@ class UnaccompaniedPersonRule(BaseRule):
 
     def _extract_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Extract unaccompanied rule config from zones config or camera root config."""
-        # Check top level config
+        if "unaccompanied_person" in config:
+            return config["unaccompanied_person"]
         if "unaccompanied" in config:
             return config["unaccompanied"]
         # Check zone rules
@@ -215,6 +216,15 @@ class UnaccompaniedPersonRule(BaseRule):
             for r in zone.get("rules", []):
                 if r.get("type") in ("unaccompanied_person", "unaccompanied"):
                     return r
+        # Direct configuration in root dict
+        if "threshold_seconds" in config or "unaccompanied_threshold_seconds" in config:
+            return {
+                "enabled": config.get("enabled", True),
+                "threshold_seconds": config.get("threshold_seconds", config.get("unaccompanied_threshold_seconds", 60)),
+                "proximity_radius_px": config.get("proximity_radius_px", 140.0),
+                "adult_height_px": config.get("adult_height_px", 160.0),
+                "small_stature_ratio": config.get("small_stature_ratio", 0.68),
+            }
         # Default configuration
         return {
             "enabled": True,
