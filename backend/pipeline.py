@@ -326,6 +326,7 @@ async def run_pipeline():
     # ── Stream loop ───────────────────────────────────────────────────────────
     fps_counter, fps_timer = 0, time.time()
     anpr_eval_frame_skip = 10  # Evaluate ANPR every 10 frames
+    last_alert_time = {}  # Tracks the last time each rule type fired an alert
 
     with StreamReader(VIDEO_SOURCE, frame_skip=FRAME_SKIP,
                       width=INPUT_W, height=INPUT_H, camera_id=CAMERA_ID) as reader:
@@ -378,10 +379,17 @@ async def run_pipeline():
 
             # ── For each confirmed alert ──────────────────────────────────────
             active_alert_data = []
+            current_time = time.time()
             for result in confirmed:
                 # Trust adjuster (F18) — skip if dismiss rate too high
                 if trust_adjuster.should_suppress(CAMERA_ID, result.rule_type):
                     continue
+
+                # Cooldown check to prevent duplicate spam (e.g., 20 seconds)
+                if current_time - last_alert_time.get(result.rule_type, 0) < 20.0:
+                    continue
+                last_alert_time[result.rule_type] = current_time
+
                 active_alert_data.append({
                     "track_ids": result.track_ids,
                     "rule_type": result.rule_type,

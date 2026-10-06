@@ -11,9 +11,10 @@ import time
 from collections import deque
 from datetime import datetime
 from typing import Optional, Tuple
-
 import cv2
 import numpy as np
+
+from storage.db import get_session, Event
 
 logger = logging.getLogger(__name__)
 
@@ -137,5 +138,17 @@ class ClipSaver:
             f"[{self.camera_id}] Clip saved: {clip_path} "
             f"({len(all_frames)} frames, {len(all_frames)/self.fps:.1f}s)"
         )
+
+        # Update the event in the DB to include the clip path
+        try:
+            db = get_session()
+            event = db.query(Event).filter(Event.id == self._pending_event_id).first()
+            if event:
+                event.clip_path = f"/media/clips/{os.path.basename(clip_path)}"
+                db.commit()
+            db.close()
+        except Exception as e:
+            logger.error(f"Failed to update clip_path in DB: {e}")
+
         self._pending_event_id = None
         self._post_buffer = []

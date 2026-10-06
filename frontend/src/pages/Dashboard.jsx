@@ -163,13 +163,13 @@ export default function Dashboard({ liveAlerts }) {
 
         {/* Right Column: Active Threats */}
         <div className="card" style={{ padding: 20, background: 'var(--bg-secondary)' }}>
-          <div className="card-header" style={{ marginBottom: 16, paddingBottom: 12 }}>
+          <div className="card-header" style={{ marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
             <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--alert-high)' }}>
               <AlertTriangle size={14} /> ACTIVE THREATS
             </div>
           </div>
           
-          <div className="alert-feed">
+          <div className="alert-feed" style={{ marginTop: 8 }}>
             {allAlerts.length > 0 ? (
               allAlerts.map(a => <ActiveThreatCard key={a.id} alert={a} onClick={() => window.location.href='/alerts'} />)
             ) : (

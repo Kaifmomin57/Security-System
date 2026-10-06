@@ -43,9 +43,7 @@ function Sidebar() {
       <NavLink to="/anpr" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
         <Car size={16} /> Vehicle Intelligence
       </NavLink>
-      <NavLink to="/traffic" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-        <Compass size={16} /> Traffic Intelligence
-      </NavLink>
+
 
 
 
