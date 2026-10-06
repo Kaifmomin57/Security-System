@@ -92,7 +92,7 @@ class TrafficViolationRule(BaseRule):
         for track in tracks:
             # Filter vehicle tracks only
             class_name = getattr(track, "class_name", "car")
-            if class_name not in VEHICLE_CLASSES and class_name != "person":
+            if class_name not in VEHICLE_CLASSES:
                 continue
 
             tid = track.track_id

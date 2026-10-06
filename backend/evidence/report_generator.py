@@ -182,21 +182,40 @@ def generate_incident_pdf(
     story.append(Paragraph("2. VISUAL EVIDENCE SNAPSHOT", section_heading))
     snapshot_included = False
 
-    if event.snapshot_path and os.path.exists(event.snapshot_path):
-        try:
-            # Scaled snapshot image (max width 500, max height 180)
-            img = Image(event.snapshot_path, width=400, height=180)
-            img.hAlign = "CENTER"
-            story.append(img)
-            snapshot_included = True
-        except Exception:
-            pass
+    raw_snapshot = event.snapshot_path
+    if raw_snapshot:
+        clean_snapshot = str(raw_snapshot).replace("\\", "/")
+        filename_only = clean_snapshot.split("/")[-1]
+
+        candidates = [
+            clean_snapshot,
+            f"./media/snapshots/{filename_only}",
+            f"media/snapshots/{filename_only}",
+            os.path.join(".", clean_snapshot.lstrip("./")),
+            os.path.abspath(clean_snapshot),
+        ]
+
+        found_path = None
+        for path in candidates:
+            if os.path.exists(path) and os.path.isfile(path):
+                found_path = path
+                break
+
+        if found_path:
+            try:
+                # Scaled evidence snapshot image
+                img = Image(found_path, width=460, height=220)
+                img.hAlign = "CENTER"
+                story.append(img)
+                snapshot_included = True
+            except Exception as err:
+                logger.error(f"Error rendering snapshot image {found_path}: {err}")
 
     if not snapshot_included:
         no_img_box = Table(
-            [[Paragraph("<i>[Visual Snapshot Captured and Archived in Cryptographic Evidence Vault]</i>", subtitle_style)]],
+            [[Paragraph("<i>[Visual Evidence Snapshot File Not Available]</i>", subtitle_style)]],
             colWidths=[540],
-            rowHeights=[60],
+            rowHeights=[50],
         )
         no_img_box.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), c_boxbg),

@@ -149,3 +149,16 @@ def download_report_pdf(event_id: str, db: Session = Depends(get_db)):
         media_type="application/pdf",
         filename=f"Incident_Report_{event_id}.pdf",
     )
+
+
+@router.delete("/{event_id}")
+def delete_report(event_id: str, db: Session = Depends(get_db)):
+    """
+    Deletes the incident report and associated event record.
+    """
+    db.query(IncidentReport).filter(IncidentReport.event_id == event_id).delete()
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if event:
+        db.delete(event)
+    db.commit()
+    return {"status": "deleted", "id": event_id}

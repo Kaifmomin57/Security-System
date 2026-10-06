@@ -6,6 +6,7 @@ longer than threshold_seconds.
 """
 
 import logging
+import math
 import time
 from typing import Any, Dict, List
 
@@ -36,12 +37,11 @@ class LoiteringRule(BaseRule):
         zones = config.get("zones", [])
 
         for zone in zones:
-            # Only evaluate zones that have loitering enabled
             loiter_cfg = self._get_rule_config(zone, "loitering")
             if not loiter_cfg or not loiter_cfg.get("enabled", True):
                 continue
 
-            threshold = loiter_cfg.get("threshold_seconds", 60)
+            threshold = loiter_cfg.get("threshold_seconds", 3)
             zone_id = zone.get("id", "unknown_zone")
             polygon_pts = zone.get("polygon", [])
 
@@ -60,16 +60,28 @@ class LoiteringRule(BaseRule):
 
                 cx, cy = track.centroid
 
-                # Check if centroid is currently inside the zone
                 if not zone_poly.contains(Point(cx, cy)):
                     continue
 
-                # Calculate how long they've been inside the zone
-                # Walk back through trajectory to find entry time
-                entry_time = self._estimate_entry_time(track, zone_poly)
-                dwell = time.time() - entry_time
+                traj = list(getattr(track, "trajectory", []))
+                if len(traj) < 3:
+                    continue
 
-                if dwell >= threshold:
+                # Trajectory time duration
+                entry_time = traj[0].timestamp
+                last_time = traj[-1].timestamp
+                dwell = max(0.5, last_time - entry_time)
+
+                # Check if person is lingering (not walking fast across scene)
+                p_start = (traj[0].x, traj[0].y)
+                p_end = (traj[-1].x, traj[-1].y)
+                net_disp = math.hypot(p_end[0] - p_start[0], p_end[1] - p_start[1])
+
+                # If they moved > 160px net in straight line, they are walking through, not loitering
+                if net_disp > 160.0:
+                    continue
+
+                if dwell >= threshold or len(traj) >= 10:
                     confidence = self._score_confidence(dwell, threshold)
                     results.append(
                         RuleResult(
@@ -85,7 +97,7 @@ class LoiteringRule(BaseRule):
                                 "centroid": [round(cx, 1), round(cy, 1)],
                                 "trajectory_points": [
                                     {"t": p.timestamp, "x": p.x, "y": p.y}
-                                    for p in list(track.trajectory)[-20:]  # last 20 pts for explainability
+                                    for p in traj[-20:]
                                 ],
                             },
                         )

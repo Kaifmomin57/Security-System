@@ -46,10 +46,10 @@ def _get_pos(pt) -> Tuple[float, float]:
 class HitAndRunRule(BaseRule):
     def __init__(
         self,
-        proximity_threshold_px: float = 80.0,
-        speed_drop_ratio: float = 0.55,
-        fleeing_speed_min_px: float = 12.0,
-        observation_window_secs: float = 4.0,
+        proximity_threshold_px: float = 160.0,
+        speed_drop_ratio: float = 0.70,
+        fleeing_speed_min_px: float = 3.0,
+        observation_window_secs: float = 2.0,
     ):
         self.proximity_threshold = proximity_threshold_px
         self.speed_drop_ratio = speed_drop_ratio

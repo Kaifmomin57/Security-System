@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Bell, Camera, Activity, TrendingUp, AlertTriangle } from 'lucide-react'
+import { Bell, Camera, Activity, TrendingUp, AlertTriangle, Play, Maximize, Map, Cpu, Shield } from 'lucide-react'
 import axios from 'axios'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -7,7 +7,7 @@ const API = 'http://localhost:8000/api/v1'
 
 const RULE_LABELS = {
   loitering:  'Loitering',
-  trailing:   'Trailing / Stalking',
+  trailing:   'Trailing Behaviour',
   intrusion:  'Zone Intrusion',
   crowd:      'Crowd Alert',
   abandoned:  'Abandoned Object',
@@ -15,253 +15,182 @@ const RULE_LABELS = {
   signal_jump: 'Traffic Signal Jump',
   wrong_side: 'Wrong-Side Driving',
   possible_hit_and_run: 'Possible Hit & Run',
-  watchlist_vehicle_match: 'Watchlist Vehicle Match',
+  watchlist_vehicle_match: 'Watchlist Match',
 }
 
-const SEV_EMOJI = { high: '🔴', medium: '🟠', low: '🟡', critical: '🚨' }
-
-function StatCard({ label, value, color, icon: Icon }) {
+function StatCard({ label, value, color }) {
   return (
-    <div className={`stat-card ${color}`}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <span className="stat-label">{label}</span>
-        <Icon size={18} color="var(--text-muted)" />
-      </div>
-      <div className="stat-value">{value}</div>
+    <div className={`stat-card ${color}`} style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="stat-value" style={{ margin: 0, fontSize: '2rem' }}>{value}</div>
+      <div className="stat-label" style={{ marginTop: 4 }}>{label}</div>
     </div>
   )
 }
 
-function AlertRow({ alert, onClick }) {
-  const ago = alert.timestamp
-    ? formatDistanceToNow(new Date(alert.timestamp), { addSuffix: true })
-    : ''
+function ActiveThreatCard({ alert, onClick }) {
   return (
     <div
       className={`alert-item severity-${alert.severity}`}
+      style={{ flexDirection: 'column', gap: 8 }}
       onClick={() => onClick(alert)}
     >
-      <span style={{ fontSize: '1.1rem' }}>{SEV_EMOJI[alert.severity] || '⚠️'}</span>
-      <div className="alert-meta">
-        <div className="alert-title">
-          {RULE_LABELS[alert.rule_type] || alert.rule_type}
-          <span className={`alert-severity-badge badge-${alert.status}`} style={{ marginLeft: 8 }}>
-            {alert.status}
-          </span>
-        </div>
-        <div className="alert-sub">
-          📷 {alert.camera_id}
-          {alert.explanation?.zone_name && ` • 📍 ${alert.explanation.zone_name}`}
-          {alert.explanation?.dwell_time && ` • ⏱ ${alert.explanation.dwell_time}s`}
-          {' • '}
-          <span className={`alert-severity-badge badge-${alert.severity}`}>{alert.severity}</span>
-          {' '}
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-            {(alert.confidence * 100).toFixed(0)}%
-          </span>
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+        <span className={`alert-severity-badge badge-${alert.severity}`}>{alert.severity}</span>
+        <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+          {(alert.confidence * 100).toFixed(0)}% CONFIDENCE
+        </span>
       </div>
-      <span className="alert-time">{ago}</span>
+      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+        {RULE_LABELS[alert.rule_type] || alert.rule_type}
+      </div>
+      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+        {alert.camera_id} • Detected {formatDistanceToNow(new Date(alert.timestamp))} ago
+      </div>
+      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', background: 'var(--bg-secondary)', padding: '6px 8px', borderRadius: '4px', marginTop: 4 }}>
+        AI detected persistent trajectory correlation.
+      </div>
+      <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 4, fontSize: '0.7rem' }}>
+        INVESTIGATE →
+      </button>
     </div>
   )
 }
 
-function AlertModal({ alert, onClose, onUpdate }) {
-  const [loading, setLoading] = useState(false)
-
-  const update = async (status) => {
-    setLoading(true)
-    try {
-      await axios.patch(`${API}/alerts/${alert.id}`, { status, responder: 'operator' })
-      onUpdate()
-      onClose()
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleDownloadPDF = () => {
-    window.open(`${API}/reports/${alert.id}/download`, '_blank')
-  }
-
-  const handleExportZIP = () => {
-    window.open(`${API}/events/${alert.id}/export-evidence?user_id=Officer_Command`, '_blank')
-  }
-
+function CameraFeed({ id, name, isMock = false }) {
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-              {SEV_EMOJI[alert.severity] || '🔴'} {RULE_LABELS[alert.rule_type] || alert.rule_type}
-            </h2>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-              Event ID: <code style={{ fontFamily: 'JetBrains Mono', color: 'var(--accent-cyan)' }}>{alert.id}</code>
-            </div>
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden', background: 'var(--bg-secondary)', position: 'relative' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: 'var(--brand-navy)', color: 'white', fontSize: '0.65rem', fontWeight: 600, letterSpacing: '1px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {name} <span style={{ color: '#94a3b8' }}>• {id}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--alert-ok)' }}>
+          <span className="ws-dot" style={{ width: 5, height: 5 }} /> LIVE
+        </div>
+      </div>
+      <div style={{ aspectRatio: '16/9', background: '#0f172a', position: 'relative' }}>
+        {isMock ? (
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#334155', flexDirection: 'column', gap: 8 }}>
+            <Camera size={24} />
+            <span style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Feed Active</span>
           </div>
-          <button className="btn btn-ghost" onClick={onClose}>✕</button>
-        </div>
-
-        {alert.snapshot_url && (
-          <img
-            src={`http://localhost:8000${alert.snapshot_url}`}
-            alt="Snapshot"
-            style={{ width: '100%', borderRadius: 8, marginBottom: 16, maxHeight: 260, objectFit: 'cover' }}
-            onError={e => e.target.style.display = 'none'}
-          />
+        ) : (
+          <img src={`http://localhost:8000/api/v1/cameras/${id}/stream`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
         )}
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-          {[
-            ['Camera', alert.camera_id],
-            ['Severity', alert.severity?.toUpperCase()],
-            ['Confidence', `${(alert.confidence * 100).toFixed(0)}%`],
-            ['Status', alert.status],
-            ['Track IDs', alert.track_ids?.join(', ')],
-            ['Zone', alert.explanation?.zone_name || '—'],
-            ['Violation Details', alert.explanation?.description || (alert.explanation?.dwell_time ? `${alert.explanation.dwell_time}s dwell` : '—')],
-            ['Time', alert.timestamp ? new Date(alert.timestamp).toLocaleString() : '—'],
-          ].map(([k, v]) => (
-            <div key={k} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 6, padding: '10px 12px' }}>
-              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 3 }}>{k}</div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', fontWeight: 500 }}>{v || '—'}</div>
-            </div>
-          ))}
+        <div style={{ display: 'none', width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, alignItems: 'center', justifyContent: 'center', color: '#334155', flexDirection: 'column', gap: 8 }}>
+            <Camera size={24} />
+            <span style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Signal Lost</span>
         </div>
-
-        {/* Forensic Police Actions */}
-        <div style={{
-          display: 'flex', gap: 10, background: 'rgba(59, 130, 246, 0.08)',
-          border: '1px solid rgba(59, 130, 246, 0.2)', borderRadius: 6, padding: '10px', marginBottom: 16
-        }}>
-          <button
-            className="btn btn-primary"
-            onClick={handleDownloadPDF}
-            style={{ flex: 1, fontSize: '0.75rem', background: '#2563eb' }}
-          >
-            📄 PDF Report
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleExportZIP}
-            style={{ flex: 1, fontSize: '0.75rem', background: '#059669' }}
-          >
-            📦 Court Evidence (.ZIP)
-          </button>
-        </div>
-
-        {alert.status === 'new' && (
-          <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-            <button className="btn btn-primary" onClick={() => update('acknowledged')} disabled={loading}>
-              ✅ Acknowledge
-            </button>
-            <button className="btn btn-success" onClick={() => update('resolved')} disabled={loading}>
-              🟢 Resolve
-            </button>
-            <button className="btn btn-danger" onClick={() => update('dismissed')} disabled={loading}>
-              ❌ Dismiss
-            </button>
-          </div>
-        )}
+        
+        {/* Overlay scanning effect */}
+        <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.05) 2px, rgba(0,0,0,0.05) 4px)', pointerEvents: 'none' }} />
       </div>
     </div>
   )
 }
 
 export default function Dashboard({ liveAlerts }) {
-  const [dbAlerts, setDbAlerts]     = useState([])
-  const [health,   setHealth]       = useState(null)
-  const [selected, setSelected]     = useState(null)
-  const [, forceRefresh]            = useState(0)
+  const [dbAlerts, setDbAlerts] = useState([])
+  const [gridSize, setGridSize] = useState('2x2')
 
   const fetchAlerts = async () => {
     try {
-      const r = await axios.get(`${API}/alerts?limit=30`)
+      const r = await axios.get(`${API}/alerts?limit=5`)
       setDbAlerts(r.data)
-    } catch (_) {}
-  }
-
-  const fetchHealth = async () => {
-    try {
-      const r = await axios.get(`${API}/health`)
-      setHealth(r.data)
     } catch (_) {}
   }
 
   useEffect(() => {
     fetchAlerts()
-    fetchHealth()
     const t1 = setInterval(fetchAlerts, 10000)
-    const t2 = setInterval(fetchHealth, 5000)
-    return () => { clearInterval(t1); clearInterval(t2) }
+    return () => clearInterval(t1)
   }, [])
 
-  // Merge live (WS) alerts on top of DB alerts
   const allAlerts = [
     ...liveAlerts.filter(la => !dbAlerts.find(d => d.id === la.id)),
     ...dbAlerts,
-  ]
-
-  const stats = {
-    total:  allAlerts.length,
-    active: allAlerts.filter(a => a.status === 'new').length,
-    high:   allAlerts.filter(a => a.severity === 'high').length,
-    cameras: health?.cameras?.length || 0,
-  }
+  ].slice(0, 3) // Only show top 3 on dashboard
 
   return (
-    <div>
-      <div className="page-header">
+    <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
-          <h1 className="page-title">Live Dashboard</h1>
-          <p className="page-subtitle">Real-time surveillance monitoring</p>
+          <h1 className="page-title">SENTRIX COMMAND CENTER</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4 }}>
+            Mumbai Unified Surveillance Network
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--alert-ok)', fontWeight: 600, marginLeft: 12 }}>
+              <span className="ws-dot" style={{ width: 6, height: 6 }} /> LIVE
+            </span>
+          </div>
         </div>
-        {health && (
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            {health.cameras?.map(c => (
-              <span key={c.camera_id} style={{ marginLeft: 12 }}>
-                📷 {c.camera_id} — {c.fps} fps
-              </span>
+        <div style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Good evening, Control Room</div>
+          AI monitoring 12 camera feeds across 5 operational zones.
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 24, marginBottom: 24 }}>
+        {/* Left Column: Live Video Grid */}
+        <div className="card" style={{ padding: 20 }}>
+          <div className="card-header" style={{ marginBottom: 16, paddingBottom: 12 }}>
+            <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Play size={14} /> LIVE SURVEILLANCE
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button 
+                className="btn btn-ghost" 
+                style={{ padding: '4px 10px', background: 'var(--bg-secondary)', fontWeight: 700 }} 
+                onClick={() => {
+                  if (gridSize === '1x1') setGridSize('2x2');
+                  else if (gridSize === '2x2') setGridSize('4x4');
+                  else setGridSize('1x1');
+                }}
+              >
+                {gridSize === '1x1' ? '▣ 1×1' : gridSize === '2x2' ? '▦ 2×2' : '▦ 4×4'}
+              </button>
+            </div>
+          </div>
+          
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: gridSize === '1x1' ? '1fr' : gridSize === '2x2' ? '1fr 1fr' : 'repeat(4, 1fr)', 
+            gap: 16 
+          }}>
+            {Array.from({ length: gridSize === '1x1' ? 1 : gridSize === '2x2' ? 4 : 16 }).map((_, i) => (
+              <CameraFeed key={i} id={`cam_${String(i+1).padStart(2, '0')}`} name={i === 0 ? "MAIN ENTRANCE" : `CAMERA ${String(i+1).padStart(2, '0')}`} isMock={i !== 0} />
             ))}
           </div>
-        )}
-      </div>
+        </div>
 
-      <div className="stats-grid">
-        <StatCard label="Total Alerts"   value={stats.total}   color="blue"   icon={Bell} />
-        <StatCard label="Active (New)"   value={stats.active}  color="orange" icon={AlertTriangle} />
-        <StatCard label="High Severity"  value={stats.high}    color="red"    icon={TrendingUp} />
-        <StatCard label="Cameras Online" value={stats.cameras} color="green"  icon={Camera} />
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 20 }}>
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Recent Alerts</span>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{allAlerts.length} events</span>
+        {/* Right Column: Active Threats */}
+        <div className="card" style={{ padding: 20, background: 'var(--bg-secondary)' }}>
+          <div className="card-header" style={{ marginBottom: 16, paddingBottom: 12 }}>
+            <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--alert-high)' }}>
+              <AlertTriangle size={14} /> ACTIVE THREATS
+            </div>
           </div>
+          
           <div className="alert-feed">
-            {allAlerts.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                <Activity size={32} style={{ marginBottom: 12, opacity: 0.4 }} />
-                <p>No alerts yet — pipeline is monitoring...</p>
+            {allAlerts.length > 0 ? (
+              allAlerts.map(a => <ActiveThreatCard key={a.id} alert={a} onClick={() => window.location.href='/alerts'} />)
+            ) : (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                <Shield size={24} style={{ opacity: 0.3, margin: '0 auto 8px' }} />
+                No active threats detected.
               </div>
             )}
-            {allAlerts.slice(0, 20).map(a => (
-              <AlertRow key={a.id} alert={a} onClick={setSelected} />
-            ))}
           </div>
         </div>
       </div>
 
-      {selected && (
-        <AlertModal
-          alert={selected}
-          onClose={() => setSelected(null)}
-          onUpdate={() => { fetchAlerts(); forceRefresh(n => n + 1) }}
-        />
-      )}
+      {/* Stats Row */}
+      <div className="stats-grid" style={{ gap: 24, marginBottom: 24 }}>
+        <StatCard label="CAMERAS" value="12" color="blue" />
+        <StatCard label="ACTIVE THREATS" value="2" color="red" />
+        <StatCard label="AVG RESPONSE" value="1:42" color="orange" />
+        <StatCard label="AI HEALTH" value="98.7%" color="green" />
+      </div>
+
+
     </div>
   )
 }

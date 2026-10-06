@@ -18,6 +18,29 @@ from api.websocket_manager import ws_manager
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 
+# ─── Routes ───────────────────────────────────────────────────────────────────
+
+@router.delete("")
+def delete_all_alerts(db: Session = Depends(get_db)):
+    """
+    Deletes ALL incident events and related records from the database.
+    """
+    from sqlalchemy import text
+    db.execute(text("DELETE FROM incident_reports"))
+    db.execute(text("DELETE FROM alert_feedback"))
+    db.execute(text("DELETE FROM evidence_access_log"))
+    db.execute(text("DELETE FROM plate_reads"))
+    db.execute(text("DELETE FROM audio_events"))
+    db.execute(text("DELETE FROM unaccompanied_events"))
+    db.execute(text("DELETE FROM track_classifications"))
+    db.execute(text("DELETE FROM traffic_violations"))
+    db.execute(text("DELETE FROM collision_events"))
+    db.execute(text("DELETE FROM tracks"))
+    db.execute(text("DELETE FROM events"))
+    db.commit()
+    return {"status": "deleted_all"}
+
+
 # ─── Schemas ──────────────────────────────────────────────────────────────────
 
 class AlertResponse(BaseModel):
@@ -122,6 +145,24 @@ async def update_alert(
     await ws_manager.broadcast_alert_update(_to_response(event).__dict__)
 
     return _to_response(event)
+
+
+@router.delete("/{event_id}")
+def delete_alert(event_id: str, db: Session = Depends(get_db)):
+    """
+    Deletes an incident event and its corresponding report from the database.
+    """
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    # Delete associated IncidentReport if exists
+    from storage.db import IncidentReport
+    db.query(IncidentReport).filter(IncidentReport.event_id == event_id).delete()
+
+    db.delete(event)
+    db.commit()
+    return {"status": "deleted", "id": event_id}
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

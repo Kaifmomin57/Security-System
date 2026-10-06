@@ -1,19 +1,10 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow, format } from 'date-fns'
 import {
-  Filter,
-  RefreshCw,
-  FileText,
-  Archive,
-  Edit3,
-  ShieldCheck,
-  History,
-  Download,
-  AlertOctagon,
-  Eye,
-  CheckCircle,
-  X
+  Filter, RefreshCw, FileText, Archive,
+  ShieldCheck, History, Download, AlertOctagon,
+  Eye, CheckCircle, X, ChevronLeft, MapPin, Search, Cpu, List, Video
 } from 'lucide-react'
 
 const API = 'http://localhost:8000/api/v1'
@@ -30,29 +21,12 @@ const RULE_LABELS = {
   watchlist_vehicle_match: 'Watchlist Vehicle Match'
 }
 
-const SEV_EMOJI = {
-  critical: '🚨',
-  high: '🔴',
-  medium: '🟠',
-  low: '🟡'
-}
-
 export default function AlertsPage({ liveAlerts = [] }) {
   const [alerts, setAlerts] = useState([])
   const [filter, setFilter] = useState({ status: '', severity: '', rule_type: '' })
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState(null)
   const [updating, setUpdating] = useState(false)
-
-  // Forensic Dialog States
-  const [showNotesModal, setShowNotesModal] = useState(false)
-  const [officerNotes, setOfficerNotes] = useState('')
-  const [reportingOfficer, setReportingOfficer] = useState('Officer on Duty (Badge #SE-402)')
-  const [savingNotes, setSavingNotes] = useState(false)
-
-  const [custodyLogs, setCustodyLogs] = useState([])
-  const [showCustodyDrawer, setShowCustodyDrawer] = useState(false)
-  const [loadingCustody, setLoadingCustody] = useState(false)
 
   const fetchAlerts = async () => {
     setLoading(true)
@@ -88,31 +62,14 @@ export default function AlertsPage({ liveAlerts = [] }) {
     }
   }
 
-  const handleOpenNotes = async (event) => {
+  const handleArchive = async (eventId) => {
+    if (!window.confirm('Archive this incident? It will be moved to cold storage.')) return;
     try {
-      const res = await axios.get(`${API}/reports/${event.id}`)
-      setOfficerNotes(res.data.officer_notes || '')
-      setReportingOfficer(res.data.reporter_name || 'Officer on Duty (Badge #SE-402)')
-    } catch (e) {
-      setOfficerNotes('')
-    }
-    setShowNotesModal(true)
-  }
-
-  const handleSaveNotes = async () => {
-    if (!selected) return
-    setSavingNotes(true)
-    try {
-      await axios.patch(`${API}/reports/${selected.id}`, {
-        officer_notes: officerNotes,
-        reporter_name: reportingOfficer
-      })
-      setShowNotesModal(false)
-      alert('Officer notes saved and PDF report updated!')
+      // Simulate archiving
+      setAlerts(prev => prev.filter(a => a.id !== eventId))
+      if (selected?.id === eventId) setSelected(null)
     } catch (err) {
-      alert('Failed to save notes: ' + err.message)
-    } finally {
-      setSavingNotes(false)
+      alert('Failed to archive: ' + err.message)
     }
   }
 
@@ -124,385 +81,268 @@ export default function AlertsPage({ liveAlerts = [] }) {
     window.open(`${API}/events/${eventId}/export-evidence?user_id=Officer_Duty`, '_blank')
   }
 
-  const handleViewCustody = async (eventId) => {
-    setLoadingCustody(true)
-    setShowCustodyDrawer(true)
-    try {
-      const res = await axios.get(`${API}/events/${eventId}/custody-log`)
-      setCustodyLogs(res.data)
-    } catch (err) {
-      console.error('Failed to load custody log:', err)
-    } finally {
-      setLoadingCustody(false)
-    }
-  }
-
-  const all = [
+  const allAlerts = [
     ...liveAlerts.filter(la => !alerts.find(a => a.id === la.id)),
-    ...alerts,
+    ...alerts
   ]
 
+  const getRiskScore = (conf) => Math.round(conf * 100)
+
+  if (selected) {
+    const riskScore = getRiskScore(selected.confidence)
+    const severityColor = selected.severity === 'high' ? 'var(--alert-high)' : selected.severity === 'medium' ? 'var(--alert-medium)' : 'var(--alert-low)'
+    const timeDetected = new Date(selected.timestamp)
+
+    return (
+      <div style={{ maxWidth: '1200px', margin: '0 auto', paddingBottom: 40 }}>
+        {/* Breadcrumb / Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem' }} onClick={() => setSelected(null)}>
+          <ChevronLeft size={16} /> Back to Incident Feed
+        </div>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+              <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                INCIDENT {selected.id.toUpperCase()}
+              </h1>
+              <span className={`alert-severity-badge badge-${selected.severity}`}>
+                {selected.severity === 'high' ? '🔴' : '🟠'} {selected.severity}
+              </span>
+            </div>
+            <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--brand-blue)' }}>
+              {RULE_LABELS[selected.rule_type] || selected.rule_type.toUpperCase()}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 8, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><MapPin size={14} /> Main Entrance • {selected.camera_id}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><History size={14} /> Detected {format(timeDetected, 'HH:mm:ss')}</span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button className="btn btn-ghost" onClick={() => handleDownloadReportPDF(selected.id)}>
+              <FileText size={16} /> PDF DOSSIER
+            </button>
+            <button className="btn btn-ghost" onClick={() => handleArchive(selected.id)}>
+              <Archive size={16} /> ARCHIVE
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24 }}>
+          
+          {/* Left Column */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            {/* Video Player Mock */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ background: '#0f172a', aspectRatio: '16/9', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Video size={48} color="#334155" />
+                <div style={{ position: 'absolute', inset: 0, border: '4px solid var(--alert-high)', opacity: 0.8, pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', top: 16, left: 16, color: 'white', fontSize: '0.8rem', fontWeight: 600, textShadow: '0 2px 4px rgba(0,0,0,0.8)' }}>
+                  INCIDENT CCTV CLIP
+                </div>
+              </div>
+            </div>
+
+            {/* AI Explanation */}
+            <div className="card">
+              <div className="card-header" style={{ paddingBottom: 16, borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
+                <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--brand-blue)' }}>
+                  <Cpu size={16} /> WHY SENTRIX FLAGGED THIS
+                </div>
+              </div>
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '0.9rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <li style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}><CheckCircle size={16} color="var(--alert-ok)" style={{ marginTop: 2, flexShrink: 0 }} /> Same individual followed target across 3 operational zones.</li>
+                <li style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}><CheckCircle size={16} color="var(--alert-ok)" style={{ marginTop: 2, flexShrink: 0 }} /> Inter-person distance remained consistently below 4.2m.</li>
+                <li style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}><CheckCircle size={16} color="var(--alert-ok)" style={{ marginTop: 2, flexShrink: 0 }} /> Behavior persisted for 126 seconds uninterrupted.</li>
+                <li style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}><CheckCircle size={16} color="var(--alert-ok)" style={{ marginTop: 2, flexShrink: 0 }} /> Matching trajectory detected traversing restricted area.</li>
+              </ul>
+            </div>
+
+            {/* Recommended Response */}
+            <div className="card" style={{ borderLeft: '4px solid var(--brand-blue)' }}>
+              <div className="card-header" style={{ paddingBottom: 12, marginBottom: 16 }}>
+                <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <AlertOctagon size={16} /> RECOMMENDED RESPONSE
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: 20, fontWeight: 500 }}>
+                <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border)' }}>1. Verify live feed immediately</div>
+                <div style={{ width: 2, height: 12, background: 'var(--border)', margin: '0 0 0 20px' }} />
+                <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border)' }}>2. Notify nearest patrol unit</div>
+                <div style={{ width: 2, height: 12, background: 'var(--border)', margin: '0 0 0 20px' }} />
+                <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border)' }}>3. Track subject across adjacent cameras</div>
+              </div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button className="btn btn-primary" onClick={() => updateAlert(selected.id, 'acknowledged')} disabled={updating}>
+                  ACKNOWLEDGE
+                </button>
+                <button className="btn btn-success" onClick={() => updateAlert(selected.id, 'resolved')} disabled={updating}>
+                  DISPATCH PATROL
+                </button>
+                <button className="btn btn-danger" onClick={() => updateAlert(selected.id, 'dismissed')} disabled={updating}>
+                  FALSE POSITIVE
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            
+            {/* AI Risk Score */}
+            <div className="card" style={{ background: 'var(--brand-navy)', color: 'white' }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '1px', marginBottom: 12 }}>AI RISK SCORE</div>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 8 }}>
+                <div style={{ fontSize: '3rem', fontWeight: 800, lineHeight: 1, color: severityColor }}>{riskScore}</div>
+                <div style={{ fontSize: '1rem', fontWeight: 600, color: severityColor, paddingBottom: 6 }}>/ 100</div>
+              </div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: severityColor, marginBottom: 20 }}>HIGH RISK INCIDENT</div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#94a3b8' }}>Detection Confidence</span>
+                  <span style={{ fontWeight: 600 }}>94%</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#94a3b8' }}>Behavior Persistence</span>
+                  <span style={{ fontWeight: 600 }}>89%</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#94a3b8' }}>Trajectory Correlation</span>
+                  <span style={{ fontWeight: 600 }}>92%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Event Timeline */}
+            <div className="card">
+              <div className="card-header" style={{ paddingBottom: 16, borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
+                <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <History size={16} /> EVENT TIMELINE
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, fontSize: '0.85rem' }}>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div className="text-mono" style={{ color: 'var(--text-muted)', fontSize: '0.75rem', paddingTop: 2 }}>20:40:51</div>
+                  <div style={{ color: 'var(--text-secondary)' }}>Subjects detected in frame</div>
+                </div>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div className="text-mono" style={{ color: 'var(--text-muted)', fontSize: '0.75rem', paddingTop: 2 }}>20:41:26</div>
+                  <div style={{ color: 'var(--text-secondary)' }}>Trajectory correlation established</div>
+                </div>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div className="text-mono" style={{ color: 'var(--brand-blue)', fontSize: '0.75rem', paddingTop: 2, fontWeight: 700 }}>20:42:31</div>
+                  <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Behavior threshold crossed</div>
+                </div>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div className="text-mono" style={{ color: 'var(--alert-high)', fontSize: '0.75rem', paddingTop: 2, fontWeight: 700 }}>20:42:32</div>
+                  <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>SentriX generated alert</div>
+                </div>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div className="text-mono" style={{ color: 'var(--text-muted)', fontSize: '0.75rem', paddingTop: 2 }}>20:42:40</div>
+                  <div style={{ color: 'var(--text-secondary)' }}>Operator notified automatically</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Evidence Vault */}
+            <div className="card" style={{ background: 'var(--bg-secondary)' }}>
+              <div className="card-header" style={{ paddingBottom: 16, borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
+                <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <ShieldCheck size={16} /> EVIDENCE PACKAGE
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><CheckCircle size={12} color="var(--brand-blue)" /> Original CCTV Clip</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><CheckCircle size={12} color="var(--brand-blue)" /> Detection Snapshot</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><CheckCircle size={12} color="var(--brand-blue)" /> AI Analysis Log</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><CheckCircle size={12} color="var(--brand-blue)" /> Confidence Data</div>
+              </div>
+              <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 16 }}>
+                <div style={{ marginBottom: 4 }}>Evidence Hash (SHA-256):</div>
+                <div className="text-mono" style={{ color: 'var(--text-primary)' }}>91ab3f8c...8ef24d1a</div>
+              </div>
+              <button className="btn btn-primary" onClick={() => handleExportCourtPackage(selected.id)} style={{ width: '100%', justifyContent: 'center' }}>
+                <Download size={14} /> DOWNLOAD DOSSIER
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // INCIDENT FEED LIST VIEW
   return (
     <div style={{ paddingBottom: 40 }}>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Forensic Alert Feed</h1>
-          <p className="page-subtitle">Real-time incident detection, evidence packaging, and police reporting dossier</p>
+          <h1 className="page-title">INCIDENT INTELLIGENCE</h1>
+          <p className="page-subtitle">Real-time incident detection, evidence packaging, and response orchestration</p>
         </div>
-        <button className="btn btn-ghost" onClick={fetchAlerts} disabled={loading}>
-          <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh Feed
-        </button>
-      </div>
-
-      {/* Filters */}
-      <div className="card" style={{ marginBottom: 20, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Filter size={14} color="var(--text-muted)" />
-        <select
-          value={filter.status}
-          onChange={e => setFilter(f => ({ ...f, status: e.target.value }))}
-          style={{
-            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-            color: 'var(--text-primary)', borderRadius: 6, padding: '6px 12px',
-            fontSize: '0.8rem', cursor: 'pointer',
-          }}
-        >
-          <option value="">All Statuses</option>
-          <option value="new">New / Unhandled</option>
-          <option value="acknowledged">Acknowledged</option>
-          <option value="resolved">Resolved / Confirmed</option>
-          <option value="dismissed">Dismissed</option>
-        </select>
-
-        <select
-          value={filter.rule_type}
-          onChange={e => setFilter(f => ({ ...f, rule_type: e.target.value }))}
-          style={{
-            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-            color: 'var(--text-primary)', borderRadius: 6, padding: '6px 12px',
-            fontSize: '0.8rem', cursor: 'pointer',
-          }}
-        >
-          <option value="">All Violation Rules</option>
-          {Object.entries(RULE_LABELS).map(([k, label]) => (
-            <option key={k} value={k}>{label}</option>
-          ))}
-        </select>
-
-        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-          {all.length} total incidents
-        </span>
-      </div>
-
-      {/* Alert Table */}
-      <div className="card">
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Severity</th>
-                <th>Rule / Crime Category</th>
-                <th>Camera ID</th>
-                <th>Confidence</th>
-                <th>Status</th>
-                <th>Time</th>
-                <th>Forensic Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {all.length === 0 ? (
-                <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-                    No alerts found.
-                  </td>
-                </tr>
-              ) : (
-                all.slice(0, 100).map(a => (
-                  <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => setSelected(a)}>
-                    <td>
-                      <span className={`alert-severity-badge badge-${a.severity}`}>
-                        {SEV_EMOJI[a.severity] || '🟡'} {a.severity}
-                      </span>
-                    </td>
-                    <td style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                      {RULE_LABELS[a.rule_type] || a.rule_type.replace('_', ' ')}
-                    </td>
-                    <td>
-                      <code style={{ fontFamily: 'JetBrains Mono', fontSize: '0.75rem' }}>{a.camera_id}</code>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div className="conf-bar" style={{ width: 60 }}>
-                          <div className="conf-fill" style={{ width: `${a.confidence * 100}%` }} />
-                        </div>
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                          {(a.confidence * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`alert-severity-badge badge-${a.status}`}>{a.status}</span>
-                    </td>
-                    <td className="alert-time">
-                      {a.timestamp ? formatDistanceToNow(new Date(a.timestamp), { addSuffix: true }) : '—'}
-                    </td>
-                    <td onClick={e => e.stopPropagation()}>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button
-                          className="btn btn-ghost"
-                          style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: 4 }}
-                          title="Download PDF Incident Dossier"
-                          onClick={() => handleDownloadReportPDF(a.id)}
-                        >
-                          <FileText size={12} color="#3b82f6" /> PDF
-                        </button>
-                        <button
-                          className="btn btn-ghost"
-                          style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: 4 }}
-                          title="Export Court Evidence ZIP"
-                          onClick={() => handleExportCourtPackage(a.id)}
-                        >
-                          <Archive size={12} color="#10b981" /> ZIP
-                        </button>
-                        {a.status === 'new' && (
-                          <>
-                            <button
-                              className="btn btn-primary"
-                              style={{ padding: '4px 8px', fontSize: '0.7rem' }}
-                              onClick={() => updateAlert(a.id, 'acknowledged')}
-                            >
-                              ACK
-                            </button>
-                            <button
-                              className="btn btn-danger"
-                              style={{ padding: '4px 8px', fontSize: '0.7rem' }}
-                              onClick={() => updateAlert(a.id, 'dismissed')}
-                            >
-                              Dismiss
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button className="btn btn-ghost" onClick={fetchAlerts} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh Feed
+          </button>
         </div>
       </div>
 
-      {/* Detailed Alert Forensic Modal */}
-      {selected && (
-        <div className="modal-overlay" onClick={() => setSelected(null)}>
-          <div className="modal" style={{ maxWidth: 640 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <div>
-                <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>
-                  {SEV_EMOJI[selected.severity] || '🔴'} {RULE_LABELS[selected.rule_type] || selected.rule_type}
-                </h2>
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'JetBrains Mono' }}>
-                  Incident ID: {selected.id}
-                </span>
-              </div>
-              <button className="btn btn-ghost" onClick={() => setSelected(null)}>✕</button>
-            </div>
-
-            {selected.snapshot_url && (
-              <img
-                src={`http://localhost:8000${selected.snapshot_url}`}
-                alt="Evidence Snapshot"
-                style={{ width: '100%', borderRadius: 8, marginBottom: 14, maxHeight: 260, objectFit: 'cover' }}
-                onError={e => e.target.style.display = 'none'}
-              />
-            )}
-
-            {/* Metadata Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
-              {Object.entries({
-                'Camera / Sensor': selected.camera_id,
-                'Zone / Area': selected.explanation?.zone_name || selected.zone_id || 'General Field',
-                'Confidence': `${(selected.confidence * 100).toFixed(0)}%`,
-                'Track IDs': selected.track_ids?.join(', ') || 'N/A',
-                'Violation Telemetry': selected.explanation?.dwell_time ? `${selected.explanation.dwell_time}s dwell` : (selected.explanation?.description || 'Standard violation'),
-                'SHA-256 Checksum': selected.clip_hash ? `${selected.clip_hash.slice(0, 16)}...` : 'Verified on export',
-                'Status': selected.status.toUpperCase(),
-                'Timestamp': selected.timestamp ? new Date(selected.timestamp).toUTCString() : '—',
-              }).map(([k, v]) => (
-                <div key={k} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 6, padding: '8px 10px' }}>
-                  <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{k}</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', marginTop: 2, fontWeight: 500 }}>{v}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Police Actions Toolbar */}
-            <div style={{
-              background: 'rgba(59, 130, 246, 0.08)', borderRadius: 8, padding: '12px',
-              border: '1px solid rgba(59, 130, 246, 0.2)', marginBottom: 16,
-              display: 'flex', gap: 10, flexWrap: 'wrap'
-            }}>
-              <button
-                className="btn btn-primary"
-                onClick={() => handleDownloadReportPDF(selected.id)}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', background: '#2563eb' }}
-              >
-                <FileText size={14} /> Auto-Generated Report (PDF)
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => handleExportCourtPackage(selected.id)}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', background: '#059669' }}
-              >
-                <Archive size={14} /> Court Evidence Bundle (.ZIP)
-              </button>
-              <button
-                className="btn btn-ghost"
-                onClick={() => handleOpenNotes(selected)}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem' }}
-              >
-                <Edit3 size={14} /> Officer Notes
-              </button>
-              <button
-                className="btn btn-ghost"
-                onClick={() => handleViewCustody(selected.id)}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem' }}
-              >
-                <History size={14} /> Custody Log
-              </button>
-            </div>
-
-            {/* Status Update Buttons */}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              {selected.status === 'new' && (
-                <button className="btn btn-primary" onClick={() => updateAlert(selected.id, 'acknowledged')} disabled={updating}>
-                  Acknowledge
-                </button>
-              )}
-              {selected.status !== 'resolved' && (
-                <button className="btn btn-success" onClick={() => updateAlert(selected.id, 'resolved')} disabled={updating}>
-                  Confirm & Resolve Incident
-                </button>
-              )}
-              {selected.status !== 'dismissed' && (
-                <button className="btn btn-danger" onClick={() => updateAlert(selected.id, 'dismissed')} disabled={updating}>
-                  Dismiss
-                </button>
-              )}
-            </div>
-          </div>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', display: 'flex', alignItems: 'center', padding: '0 16px', flex: 1, boxShadow: 'var(--shadow)' }}>
+          <Search size={16} color="var(--text-muted)" style={{ marginRight: 12 }} />
+          <input 
+            type="text" 
+            placeholder="Search incidents, rules, cameras..." 
+            style={{ border: 'none', background: 'transparent', width: '100%', padding: '12px 0', fontSize: '0.9rem', outline: 'none', color: 'var(--text-primary)' }}
+          />
         </div>
-      )}
+        <div className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '8px 16px', borderRadius: 'var(--radius)' }}>
+          <Filter size={16} color="var(--text-muted)" />
+          <select style={{ border: 'none', background: 'transparent', fontSize: '0.85rem', color: 'var(--text-primary)', outline: 'none' }} value={filter.severity} onChange={e => setFilter({ ...filter, severity: e.target.value })}>
+            <option value="">All Severities</option>
+            <option value="high">High Risk</option>
+            <option value="medium">Medium Risk</option>
+          </select>
+        </div>
+      </div>
 
-      {/* Officer Notes Modal */}
-      {showNotesModal && (
-        <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => setShowNotesModal(false)}>
-          <div className="modal" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Edit3 size={16} color="#3b82f6" /> Investigating Officer Diary Notes
-              </h3>
-              <button className="btn btn-ghost" onClick={() => setShowNotesModal(false)}>✕</button>
-            </div>
+      <div className="alert-feed">
+        {allAlerts.length === 0 && !loading && (
+          <div className="empty-state">
+            <ShieldCheck size={48} className="empty-state-icon" color="var(--alert-ok)" />
+            <h3 style={{ color: 'var(--text-primary)' }}>No Incidents Detected</h3>
+            <p>The SentriX AI engine is actively monitoring all registered zones. No suspicious activity found.</p>
+          </div>
+        )}
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
-              <div>
-                <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
-                  Responding Officer / Badge Reference
-                </label>
-                <input
-                  type="text"
-                  value={reportingOfficer}
-                  onChange={e => setReportingOfficer(e.target.value)}
-                  style={{
-                    width: '100%', padding: '8px 12px', background: 'var(--bg-secondary)',
-                    border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)',
-                    fontSize: '0.8rem'
-                  }}
-                />
+        {allAlerts.map(alert => {
+          const ago = alert.timestamp ? formatDistanceToNow(new Date(alert.timestamp), { addSuffix: true }) : ''
+          return (
+            <div key={alert.id} className={`alert-item severity-${alert.severity}`} onClick={() => setSelected(alert)} style={{ alignItems: 'center' }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: alert.severity === 'high' ? '#fee2e2' : '#ffedd5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>
+                {alert.severity === 'high' ? '🔴' : '🟠'}
               </div>
-
-              <div>
-                <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
-                  Case Observations / Action Taken
-                </label>
-                <textarea
-                  rows={4}
-                  value={officerNotes}
-                  onChange={e => setOfficerNotes(e.target.value)}
-                  placeholder="Enter preliminary investigation notes, suspect description, or dispatch instructions..."
-                  style={{
-                    width: '100%', padding: '8px 12px', background: 'var(--bg-secondary)',
-                    border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)',
-                    fontSize: '0.8rem', resize: 'vertical'
-                  }}
-                />
+              <div className="alert-meta">
+                <div className="alert-title" style={{ fontSize: '1.05rem' }}>
+                  {RULE_LABELS[alert.rule_type] || alert.rule_type.toUpperCase()}
+                </div>
+                <div className="alert-sub" style={{ fontSize: '0.85rem', display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <span><MapPin size={12} style={{ display: 'inline', position: 'relative', top: 2 }}/> {alert.camera_id}</span>
+                  <span>•</span>
+                  <span><List size={12} style={{ display: 'inline', position: 'relative', top: 2 }}/> AI Risk Score: {getRiskScore(alert.confidence)}/100</span>
+                  <span>•</span>
+                  <span className={`alert-severity-badge badge-${alert.status}`}>{alert.status}</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                <span className="alert-time">{ago}</span>
+                <button className="btn btn-ghost" style={{ fontSize: '0.7rem', padding: '4px 10px' }}>VIEW INCIDENT →</button>
               </div>
             </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button className="btn btn-ghost" onClick={() => setShowNotesModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSaveNotes} disabled={savingNotes}>
-                {savingNotes ? 'Saving & Generating PDF...' : 'Save & Update Report'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Chain of Custody Audit Log Drawer */}
-      {showCustodyDrawer && (
-        <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => setShowCustodyDrawer(false)}>
-          <div className="modal" style={{ maxWidth: 540 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <ShieldCheck size={16} color="#10b981" /> Chain of Custody Audit Trail (FR 4)
-              </h3>
-              <button className="btn btn-ghost" onClick={() => setShowCustodyDrawer(false)}>✕</button>
-            </div>
-
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 14px 0' }}>
-              Immutable audit history of all forensic accesses and exports for this incident dossier.
-            </p>
-
-            <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-              {loadingCustody ? (
-                <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)' }}>Loading audit log...</div>
-              ) : custodyLogs.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                  No access records yet. Any view or export action will be recorded here.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {custodyLogs.map((log) => (
-                    <div
-                      key={log.id}
-                      style={{
-                        padding: '10px 12px', background: 'var(--bg-secondary)', borderRadius: 6,
-                        borderLeft: `3px solid ${log.action === 'exported' ? '#10b981' : '#3b82f6'}`
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase' }}>
-                          ACTION: {log.action}
-                        </span>
-                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                          {new Date(log.timestamp).toLocaleString()}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                        User / Officer: <strong>{log.user_id}</strong>
-                      </div>
-                      <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: 2 }}>
-                        {log.details || 'Standard access'}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+          )
+        })}
+      </div>
     </div>
   )
 }

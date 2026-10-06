@@ -53,9 +53,9 @@ class FusionEngine:
 
     def __init__(
         self,
-        n_required: int = 5,
-        m_window: int = 8,
-        cooldown_secs: int = 30,
+        n_required: int = 2,
+        m_window: int = 4,
+        cooldown_secs: int = 10,
     ):
         self.n_required = n_required
         self.m_window = m_window

@@ -7,6 +7,7 @@ import CamerasPage from './pages/CamerasPage'
 import PatrolHeatmapPage from './pages/PatrolHeatmapPage'
 import ANPRWatchlistPage from './pages/ANPRWatchlistPage'
 import TrafficOperationsPage from './pages/TrafficOperationsPage'
+import ChatBot from './components/ChatBot'
 import './index.css'
 
 const WS_URL = 'ws://localhost:8000/ws/alerts'
@@ -15,36 +16,40 @@ function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <Shield size={22} />
-        SentryEye
-        <span className="logo-dot" />
+        <Shield size={24} style={{ color: 'var(--brand-blue)' }} />
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span style={{ lineHeight: 1 }}>SENTRIX</span>
+          <span style={{ fontSize: '0.5rem', fontWeight: 600, letterSpacing: '1px', color: 'var(--text-muted)' }}>AI PUBLIC SAFETY</span>
+        </div>
       </div>
 
-      <span className="sidebar-section-label">Monitor</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', fontSize: '0.65rem', fontWeight: 700, color: '#34d399', marginBottom: 16 }}>
+        <span className="logo-dot" style={{ margin: 0, width: 6, height: 6 }} /> Operational
+      </div>
+
+      <span className="sidebar-section-label">Command Center</span>
       <NavLink to="/" end className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-        <LayoutGrid size={16} /> Dashboard
-      </NavLink>
-      <NavLink to="/alerts" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-        <Bell size={16} /> Alerts & Forensic
-      </NavLink>
-      <NavLink to="/cameras" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-        <Camera size={16} /> Cameras
+        <LayoutGrid size={16} /> Overview
       </NavLink>
 
-      <span className="sidebar-section-label">Police Operations</span>
+      <NavLink to="/alerts" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+        <Bell size={16} /> Incidents
+      </NavLink>
+
+      <span className="sidebar-section-label">Field Intelligence</span>
       <NavLink to="/heatmap" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-        <Flame size={16} /> Patrol Heatmap
+        <Flame size={16} /> Threat Map
       </NavLink>
       <NavLink to="/anpr" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-        <Car size={16} /> ANPR & Watchlist
+        <Car size={16} /> Vehicle Intelligence
       </NavLink>
       <NavLink to="/traffic" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-        <Compass size={16} /> Traffic & Junctions
+        <Compass size={16} /> Traffic Intelligence
       </NavLink>
 
-      <span className="sidebar-section-label" style={{ marginTop: 'auto' }}>System</span>
-      <div className="nav-item"><Activity size={16} /> Health</div>
-      <div className="nav-item"><Settings size={16} /> Settings</div>
+
+
+
     </aside>
   )
 }
@@ -52,27 +57,42 @@ function Sidebar() {
 function TopBar({ wsConnected, alertCount }) {
   const location = useLocation()
   const titles = {
-    '/': 'Surveillance Command Dashboard',
-    '/alerts': 'Forensic Alert Feed & Evidence Vault',
-    '/cameras': 'Camera Management & Calibrations',
-    '/heatmap': 'Historical Incident Heatmap & Patrol Planning',
-    '/anpr': 'ANPR & Vehicle Watchlist Intercept Hub',
-    '/traffic': 'Traffic Violation & Junction Control',
+    '/': 'SENTRIX COMMAND CENTER',
+    '/alerts': 'INCIDENT INTELLIGENCE',
+    '/cameras': 'CAMERA NETWORK',
+    '/heatmap': 'THREAT MAP & PATROL PLANNING',
+    '/anpr': 'VEHICLE INTELLIGENCE',
+    '/traffic': 'TRAFFIC INTELLIGENCE',
   }
   return (
-    <header className="topbar">
-      <div>
-        <div className="topbar-title">{titles[location.pathname] || 'SentryEye Police Operations Suite'}</div>
+    <header className="topbar" style={{ padding: '0 24px', display: 'flex', gap: '24px' }}>
+      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div className="topbar-title">{titles[location.pathname] || 'SENTRIX COMMAND CENTER'}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span className="ws-dot" style={{ width: 6, height: 6 }} /> AI ONLINE</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span className="ws-dot" style={{ width: 6, height: 6, background: '#cbd5e1', boxShadow: 'none' }} /> 10/12 CAMERAS</span>
+          {alertCount > 0 && <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--alert-high)' }}>⚠ {alertCount} ACTIVE</span>}
+        </div>
       </div>
-      <div className="topbar-right">
-        {alertCount > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: 'var(--alert-high)' }}>
-            <Eye size={14} /> {alertCount} active alert{alertCount !== 1 ? 's' : ''}
-          </div>
-        )}
-        <div className="ws-indicator">
-          <span className={`ws-dot ${wsConnected ? '' : 'offline'}`} />
-          {wsConnected ? 'Live' : 'Reconnecting...'}
+
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+        <div style={{ width: '100%', maxWidth: '400px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '6px 12px', fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          ⌕ Search cameras, vehicles, incidents...
+        </div>
+      </div>
+
+      <div className="topbar-right" style={{ gap: 16 }}>
+        <div style={{ position: 'relative', cursor: 'pointer' }}>
+          <Bell size={18} color="var(--text-secondary)" />
+          {alertCount > 0 && (
+            <div style={{ position: 'absolute', top: -4, right: -4, background: 'var(--alert-high)', color: 'white', fontSize: '0.55rem', fontWeight: 800, padding: '1px 4px', borderRadius: '10px' }}>
+              {alertCount}
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer' }}>
+          <div style={{ width: 28, height: 28, background: 'var(--brand-navy)', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem' }}>CR</div>
+          Control Room ▾
         </div>
       </div>
     </header>
@@ -154,6 +174,7 @@ export default function App() {
           <Routes>
             <Route path="/"        element={<Dashboard liveAlerts={liveAlerts} />} />
             <Route path="/alerts"  element={<AlertsPage liveAlerts={liveAlerts} />} />
+            <Route path="/live"    element={<CamerasPage liveAlerts={liveAlerts} />} />
             <Route path="/cameras" element={<CamerasPage liveAlerts={liveAlerts} />} />
             <Route path="/heatmap" element={<PatrolHeatmapPage />} />
             <Route path="/anpr"    element={<ANPRWatchlistPage />} />
@@ -161,6 +182,7 @@ export default function App() {
           </Routes>
         </main>
         <Toast toasts={toasts} onRemove={id => setToasts(p => p.filter(t => t.id !== id))} />
+        <ChatBot />
       </div>
     </BrowserRouter>
   )

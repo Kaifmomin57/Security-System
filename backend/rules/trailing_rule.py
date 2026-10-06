@@ -38,10 +38,10 @@ class TrailingRule(BaseRule):
         results = []
         trailing_cfg = config.get("trailing", {})
 
-        min_dist   = trailing_cfg.get("min_follow_distance", 40)
-        max_dist   = trailing_cfg.get("max_follow_distance", 200)
-        duration   = trailing_cfg.get("duration_threshold", 45)
-        max_people = trailing_cfg.get("max_ambient_persons", 4)
+        min_dist   = trailing_cfg.get("min_follow_distance", 20)
+        max_dist   = trailing_cfg.get("max_follow_distance", 320)
+        duration   = trailing_cfg.get("duration_threshold", 2.5)
+        max_people = trailing_cfg.get("max_ambient_persons", 8)
 
         # Filter to persons only
         persons = [t for t in tracks if t.class_name == "person"]
@@ -81,12 +81,12 @@ class TrailingRule(BaseRule):
         traj_a = list(track_a.trajectory)
         traj_b = list(track_b.trajectory)
 
-        if len(traj_a) < 10 or len(traj_b) < 10:
+        if len(traj_a) < 4 or len(traj_b) < 4:
             return None  # Not enough history yet
 
         # Align trajectories by timestamp
         aligned = self._align_trajectories(traj_a, traj_b)
-        if len(aligned) < 5:
+        if len(aligned) < 3:
             return None
 
         # Measure following distance at each aligned time point
@@ -99,18 +99,16 @@ class TrailingRule(BaseRule):
         in_range_count = sum(1 for d in distances if min_dist <= d <= max_dist)
         in_range_ratio = in_range_count / len(distances)
 
-        # Require at least 70% of aligned points to be in range
-        if in_range_ratio < 0.70:
+        # Require at least 50% of aligned points to be in range
+        if in_range_ratio < 0.50:
             return None
 
         # Check if this condition has been sustained for long enough
-        duration_covered = aligned[-1][0][0]  # last timestamp proxy via traj_a
-        # Use actual timestamps from trajectory points
         first_ts = traj_a[0].timestamp if hasattr(traj_a[0], "timestamp") else time.time() - 60
         last_ts  = traj_a[-1].timestamp if hasattr(traj_a[-1], "timestamp") else time.time()
-        sustained_seconds = last_ts - first_ts
+        sustained_seconds = max(0.5, last_ts - first_ts)
 
-        if sustained_seconds < duration_threshold:
+        if sustained_seconds < duration_threshold and len(traj_a) < 8:
             return None
 
         confidence = self._score_confidence(sustained_seconds, duration_threshold, in_range_ratio)
