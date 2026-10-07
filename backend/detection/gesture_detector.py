@@ -26,7 +26,7 @@ import os
 import sys
 import time
 from collections import defaultdict, deque
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -252,6 +252,18 @@ class GestureDetector:
             desc = f"Hand Gesture: {top_gesture}"
 
         return False, top_conf, desc
+
+    def detect_distress_gesture(self, person_crop: np.ndarray, track_id: int = 1) -> Dict[str, Any]:
+        """
+        Helper method returning dict representation for video processors and APIs.
+        """
+        is_sos, conf, desc = self.process_person_crop(person_crop, track_id)
+        return {
+            "detected": is_sos or (conf > 0.80 and desc is not None),
+            "confidence": conf,
+            "gesture_type": desc or "Unknown",
+            "is_distress": is_sos,
+        }
 
     def draw_landmarks(self, image: np.ndarray, person_crop_bbox: Tuple[int, int, int, int]) -> np.ndarray:
         """Utility to annotate detected hands and gesture labels on full image."""

@@ -135,9 +135,17 @@ def draw_overlays(frame, tracks, active_alerts, raw_detections=None):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
 
     # 2. Draw person / vehicle tracks
+    from detection.gesture_detector import gesture_detector
     for track in tracks:
         x1, y1, x2, y2 = [int(v) for v in track.bbox]
         color = (0, 255, 0)  # green = normal
+
+        # Draw hand gesture landmarks for person tracks
+        if getattr(track, "class_name", "") == "person" and gesture_detector:
+            try:
+                frame = gesture_detector.draw_landmarks(frame, (x1, y1, x2, y2))
+            except Exception:
+                pass
 
         # Red for tracks involved in active alerts
         is_alert = False

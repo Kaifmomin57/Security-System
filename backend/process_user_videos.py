@@ -274,6 +274,14 @@ def process_single_video(video_path):
         for trk in tracks:
             x1, y1, x2, y2 = [int(v) for v in trk.bbox]
             color = (0, 255, 0)
+
+            # Draw hand gesture landmarks for person tracks
+            if trk.class_name == "person" and gesture_detector:
+                try:
+                    annotated_frame = gesture_detector.draw_landmarks(annotated_frame, (x1, y1, x2, y2))
+                except Exception:
+                    pass
+
             # Red if involved in alert
             if any(trk.track_id in al.track_ids for al in confirmed_alerts):
                 color = (0, 0, 255)
