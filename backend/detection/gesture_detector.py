@@ -59,10 +59,16 @@ class GestureDetector:
             from mediapipe.tasks import python
             from mediapipe.tasks.python import vision
 
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            model_path = os.path.join(base_dir, "hand_landmarker.task")
-            if not os.path.exists(model_path):
-                model_path = os.path.join(base_dir, "backend", "hand_landmarker.task")
+            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            repository_dir = os.path.dirname(backend_dir)
+            model_candidates = [
+                os.path.join(backend_dir, "hand_landmarker.task"),
+                os.path.join(repository_dir, "hand_landmarker.task"),
+            ]
+            model_path = next(
+                (candidate for candidate in model_candidates if os.path.isfile(candidate)),
+                model_candidates[0],
+            )
 
             if os.path.exists(model_path):
                 base_options = python.BaseOptions(model_asset_path=model_path)

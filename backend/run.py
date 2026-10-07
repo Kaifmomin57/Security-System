@@ -63,20 +63,26 @@ async def main(sources: list[str]):
     server = uvicorn.Server(config)
     logger.info("Starting FastAPI server on http://localhost:8000 ...")
 
-    # Build one pipeline coroutine per source
-    pipeline_tasks = []
+    # Keep pipeline coroutines uncreated until the API has completed startup.
+    pipelines = []
     for idx, src in enumerate(sources):
         cam_id   = f"cam_{str(idx + 1).zfill(2)}"
         cam_name = CAMERA_NAMES.get(cam_id, f"Camera {idx + 1:02d}")
         logger.info(f"  [{cam_id}] → {src}")
-        pipeline_tasks.append(
-            run_pipeline(camera_id=cam_id, video_source=src, camera_name=cam_name)
-        )
+        pipelines.append((cam_id, src, cam_name))
 
-    # Give uvicorn a moment to bind the port before pipelines start
+    # Wait for database/API startup rather than a fixed delay. On startup
+    # failure, no unawaited pipeline coroutines are left behind.
     async def delayed_pipelines():
-        await asyncio.sleep(3)
-        await asyncio.gather(*pipeline_tasks)
+        while not server.started:
+            if server.should_exit:
+                logger.error("API server stopped before startup; camera pipelines will not start.")
+                return
+            await asyncio.sleep(0.1)
+        await asyncio.gather(*(
+            run_pipeline(camera_id=cam_id, video_source=src, camera_name=cam_name)
+            for cam_id, src, cam_name in pipelines
+        ))
 
     # Run API server + all pipelines concurrently
     await asyncio.gather(server.serve(), delayed_pipelines())
