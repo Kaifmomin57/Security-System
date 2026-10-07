@@ -444,16 +444,25 @@ async def run_pipeline():
 
         for frame_idx, timestamp, frame in reader.stream():
 
-            # ── Detection + Tracking ─────────────────────────────────────────
+            # ── Model 1: Main Detector (yolov8s.pt) ──────────────────────────
+            # Detects: person, car, motorcycle, bus, truck, backpack, handbag, suitcase
+            # Does NOT detect guns/knives (removed from COCO_CLASSES_OF_INTEREST)
             detections = detector.detect(frame)
+
+            # ── Model 2: Weapon Detector (best.pt) ────────────────────────────
+            # Detects ONLY: gun, knife — specialized 2-class model
+            # Kept separate to avoid duplicate detections with main model
             try:
                 from detection.weapon_detector import weapon_detector
                 weapon_dets = weapon_detector.detect(frame) if weapon_detector else []
             except Exception:
                 weapon_dets = []
+
+            # all_detections used for overlays & rule evaluation (both models combined)
+            # tracker.update gets ONLY main detections (persons/vehicles for tracking)
             all_detections = detections + weapon_dets
 
-            tracks     = tracker.update(detections, frame, frame_idx, timestamp)
+            tracks = tracker.update(detections, frame, frame_idx, timestamp)
 
             # ── Feed rolling clip buffer ─────────────────────────────────────
             clip_saver.push_frame(frame)

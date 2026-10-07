@@ -17,6 +17,9 @@ const RULE_LABELS = {
   intrusion: 'Zone Intrusion',
   crowd: 'Crowd Density',
   unaccompanied_person: 'Unaccompanied Person',
+  signal_for_help: 'Signal for Help (Distress Gesture)',
+  possible_weapon: 'Weapon Detection (Gun / Knife)',
+  abandoned_object: 'Abandoned / Suspicious Object',
   signal_jump: 'Traffic Signal Jump',
   wrong_side: 'Wrong-Side Driving',
   possible_hit_and_run: 'Possible Hit & Run',
@@ -32,7 +35,6 @@ export default function AlertsPage({ liveAlerts = [] }) {
   const [selectedAlertIds, setSelectedAlertIds] = useState(new Set())
 
   const fetchAlerts = async () => {
-    setLoading(true)
     try {
       const params = {}
       if (filter.status) params.status = filter.status
@@ -41,14 +43,14 @@ export default function AlertsPage({ liveAlerts = [] }) {
       setAlerts(r.data)
     } catch (err) {
       console.error('Failed to fetch alerts:', err)
-    } finally {
-      setLoading(false)
     }
   }
 
   useEffect(() => {
     fetchAlerts()
-  }, [filter])
+    const interval = setInterval(fetchAlerts, 2500)
+    return () => clearInterval(interval)
+  }, [filter, liveAlerts])
 
   const updateAlert = async (id, status) => {
     setUpdating(true)
@@ -135,13 +137,76 @@ export default function AlertsPage({ liveAlerts = [] }) {
 
   const getRiskScore = (conf) => Math.round(conf * 100)
 
+  const getMediaUrl = (url) => {
+    if (!url) return null
+    if (url.startsWith('http://') || url.startsWith('https://')) return url
+    const filename = url.replace(/\\/g, '/').split('/').pop()
+    if (!filename) return null
+    if (url.includes('clips') || url.endsWith('.mp4')) {
+      return `http://localhost:8000/media/clips/${filename}`
+    }
+    return `http://localhost:8000/media/snapshots/${filename}`
+  }
+
   // ────────────────────────────────────────────────────────────────────────────────
-  // DETAIL VIEW (UNCHANGED logic, tweaked classes for consistency)
+  // DETAIL VIEW
   // ────────────────────────────────────────────────────────────────────────────────
   if (selected) {
     const riskScore = getRiskScore(selected.confidence)
     const severityColor = selected.severity === 'high' ? '#ef4444' : selected.severity === 'medium' ? '#f59e0b' : '#3b82f6'
     const timeDetected = new Date(selected.timestamp)
+
+    const snapshotImg = getMediaUrl(selected.snapshot_url) || "https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=900&h=560&fit=crop"
+    const clipVid = getMediaUrl(selected.clip_url || selected.clip_path)
+
+    const slides = [
+      {
+        image: snapshotImg,
+        title: `Detection Snapshot — ${format(timeDetected, 'HH:mm:ss')}`,
+        caption: selected.explanation?.description || "High-resolution frame captured at moment of trigger.",
+        alt: "Primary evidence snapshot"
+      },
+      ...(clipVid ? [{
+        video: clipVid,
+        title: `Recorded Video Evidence`,
+        caption: "Full CCTV incident video clip.",
+        alt: "Incident video clip"
+      }] : []),
+      {
+        image: snapshotImg,
+        title: "AI Analysis Frame",
+        caption: `Detection confidence: ${(selected.confidence * 100).toFixed(0)}%`,
+        alt: "AI Analysis"
+      }
+    ]
+
+    const whyFlaggedReasons = []
+    if (selected.rule_type === 'possible_weapon') {
+      whyFlaggedReasons.push(`Weapon detected (${selected.explanation?.weapon_class?.toUpperCase() || 'WEAPON'}) with ${(selected.confidence * 100).toFixed(0)}% confidence.`)
+      whyFlaggedReasons.push(`Specialist neural detection model flagged high-risk tactical threat.`)
+      whyFlaggedReasons.push(`Object flagged for mandatory officer human verification.`)
+      whyFlaggedReasons.push(`Camera ${selected.camera_id} video buffer preserved for evidence.`)
+    } else if (selected.rule_type === 'signal_for_help') {
+      whyFlaggedReasons.push(`Signal-for-Help distress hand gesture confirmed by AI gesture engine.`)
+      whyFlaggedReasons.push(`Deliberate sequence (thumb tucked in palm + fingers folded) detected.`)
+      whyFlaggedReasons.push(`Immediate safety intervention required for subject.`)
+      whyFlaggedReasons.push(`Evidence snapshot securely hashed and timestamped.`)
+    } else if (selected.rule_type === 'trailing') {
+      whyFlaggedReasons.push(`Subject followed target across trajectory path.`)
+      whyFlaggedReasons.push(`Inter-person distance remained consistently below threshold.`)
+      whyFlaggedReasons.push(`Movement vector correlation confirmed (directional alignment).`)
+      whyFlaggedReasons.push(`Follower automatically added to Cross-Camera Re-ID gallery.`)
+    } else if (selected.rule_type === 'abandoned_object') {
+      whyFlaggedReasons.push(`Unattended luggage/bag left stationary without owner nearby.`)
+      whyFlaggedReasons.push(`Dwell timer exceeded unattended safety threshold.`)
+      whyFlaggedReasons.push(`Owner proximity scan negative in surrounding zone.`)
+      whyFlaggedReasons.push(`Security perimeter alert initiated.`)
+    } else {
+      whyFlaggedReasons.push(selected.explanation?.description || 'Behavior persistence confirmed by surveillance engine.')
+      whyFlaggedReasons.push(`Detection confidence scored at ${(selected.confidence * 100).toFixed(0)}%.`)
+      whyFlaggedReasons.push(`Real-time safety rule triggered on camera ${selected.camera_id}.`)
+      whyFlaggedReasons.push(`Evidence dossier generated for review.`)
+    }
 
     return (
       <div className="max-w-[1200px] mx-auto pb-10 px-6 pt-6">
@@ -181,26 +246,7 @@ export default function AlertsPage({ liveAlerts = [] }) {
                 background="transparent"
                 ink="#0f172a"
                 ariaLabel="Incident evidence frames"
-                slides={[
-                  {
-                    ...(selected.clip_path ? { video: `http://localhost:8000${selected.clip_path}` } : { image: selected.snapshot_url ? `http://localhost:8000${selected.snapshot_url}` : "https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=900&h=560&fit=crop" }),
-                    title: `Evidence Proof — ${format(timeDetected, 'HH:mm:ss')}`,
-                    caption: selected.clip_path ? "Full incident video recording." : "Primary detection frame triggered by SentriX.",
-                    alt: "Primary evidence"
-                  },
-                  {
-                    image: selected.snapshot_url ? `http://localhost:8000${selected.snapshot_url}` : "https://images.unsplash.com/photo-1584433144859-1fc3ab64a957?w=900&h=560&fit=crop",
-                    title: "Detection Snapshot",
-                    caption: "High-res snapshot at moment of trigger.",
-                    alt: "Snapshot frame"
-                  },
-                  {
-                    image: "https://images.unsplash.com/photo-1555099962-4199c345e5dd?w=900&h=560&fit=crop",
-                    title: "AI Analysis",
-                    caption: "Behavior persistence confirmed across zones.",
-                    alt: "Tertiary CCTV frame"
-                  }
-                ]}
+                slides={slides}
               />
             </div>
 
@@ -209,10 +255,12 @@ export default function AlertsPage({ liveAlerts = [] }) {
                 <Cpu size={18} /> WHY SENTRIX FLAGGED THIS
               </div>
               <ul className="flex flex-col gap-3 text-sm text-slate-600 font-medium">
-                <li className="flex gap-3 items-start"><CheckCircle size={18} className="text-emerald-500 shrink-0 mt-0.5" /> Same individual followed target across 3 operational zones.</li>
-                <li className="flex gap-3 items-start"><CheckCircle size={18} className="text-emerald-500 shrink-0 mt-0.5" /> Inter-person distance remained consistently below 4.2m.</li>
-                <li className="flex gap-3 items-start"><CheckCircle size={18} className="text-emerald-500 shrink-0 mt-0.5" /> Behavior persisted for 126 seconds uninterrupted.</li>
-                <li className="flex gap-3 items-start"><CheckCircle size={18} className="text-emerald-500 shrink-0 mt-0.5" /> Matching trajectory detected traversing restricted area.</li>
+                {whyFlaggedReasons.map((reason, idx) => (
+                  <li key={idx} className="flex gap-3 items-start">
+                    <CheckCircle size={18} className="text-emerald-500 shrink-0 mt-0.5" />
+                    {reason}
+                  </li>
+                ))}
               </ul>
             </div>
 
@@ -246,12 +294,14 @@ export default function AlertsPage({ liveAlerts = [] }) {
                 <div className="text-5xl font-black leading-none" style={{ color: severityColor }}>{riskScore}</div>
                 <div className="text-lg font-bold pb-1" style={{ color: severityColor }}>/ 100</div>
               </div>
-              <div className="text-sm font-bold mb-5" style={{ color: severityColor }}>HIGH RISK INCIDENT</div>
+              <div className="text-sm font-bold mb-5" style={{ color: severityColor }}>
+                {selected.severity === 'high' ? 'HIGH RISK INCIDENT' : selected.severity === 'medium' ? 'MODERATE RISK INCIDENT' : 'EVALUATION NOTICE'}
+              </div>
               
               <div className="flex flex-col gap-2.5 text-sm">
-                <div className="flex justify-between items-center"><span className="text-slate-500 font-medium">Detection Confidence</span><span className="font-bold text-slate-900">94%</span></div>
-                <div className="flex justify-between items-center"><span className="text-slate-500 font-medium">Behavior Persistence</span><span className="font-bold text-slate-900">89%</span></div>
-                <div className="flex justify-between items-center"><span className="text-slate-500 font-medium">Trajectory Correlation</span><span className="font-bold text-slate-900">92%</span></div>
+                <div className="flex justify-between items-center"><span className="text-slate-500 font-medium">Detection Confidence</span><span className="font-bold text-slate-900">{(selected.confidence * 100).toFixed(0)}%</span></div>
+                <div className="flex justify-between items-center"><span className="text-slate-500 font-medium">Rule Category</span><span className="font-bold text-slate-900">{RULE_LABELS[selected.rule_type] || selected.rule_type}</span></div>
+                <div className="flex justify-between items-center"><span className="text-slate-500 font-medium">Severity Level</span><span className="font-bold text-slate-900 uppercase">{selected.severity}</span></div>
               </div>
             </div>
 
@@ -358,21 +408,32 @@ export default function AlertsPage({ liveAlerts = [] }) {
                     />
                   </div>
                   
-                  {/* Video Thumbnail */}
+                  {/* Video / Snapshot Thumbnail */}
                   <div className="relative w-full sm:w-[220px] h-[140px] bg-slate-900 rounded-lg overflow-hidden shrink-0 group">
-                    <video autoPlay loop muted playsInline className="w-full h-full object-cover opacity-80">
-                      <source src="https://assets.mixkit.co/videos/preview/mixkit-people-walking-in-a-busy-street-23849-large.mp4" type="video/mp4" />
-                    </video>
+                    {getMediaUrl(alert.snapshot_url) ? (
+                      <img 
+                        src={getMediaUrl(alert.snapshot_url)} 
+                        alt="Incident Snapshot" 
+                        className="w-full h-full object-cover" 
+                        onError={(e) => { e.target.onerror = null; e.target.src = "https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=900&h=560&fit=crop"; }}
+                      />
+                    ) : (
+                      <img 
+                        src="https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=900&h=560&fit=crop" 
+                        alt="Surveillance Frame" 
+                        className="w-full h-full object-cover opacity-80" 
+                      />
+                    )}
                     <div className={`absolute top-2 left-2 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${isHigh?'bg-red-600 text-white':'bg-orange-500 text-white'}`}>
                       {isHigh ? 'CRITICAL' : 'MEDIUM'}
                     </div>
-                    <div className="absolute bottom-2 left-2 font-mono text-[10px] text-white/80">{isHigh?'00:32':'00:28'}</div>
+                    <div className="absolute bottom-2 left-2 font-mono text-[10px] text-white/80">{alert.rule_type?.toUpperCase()}</div>
                   </div>
 
                   {/* Info */}
                   <div className="flex-1 flex flex-col justify-center min-w-0">
                     <div className="flex items-center gap-3 mb-2">
-                      <h3 className="font-bold text-[16px] text-slate-900 leading-tight truncate">{RULE_LABELS[alert.rule_type] || 'Trailing / Stalking'}</h3>
+                      <h3 className="font-bold text-[16px] text-slate-900 leading-tight truncate">{RULE_LABELS[alert.rule_type] || alert.rule_type?.replace(/_/g, ' ').toUpperCase()}</h3>
                       <span className={`text-[18px] font-black ${isHigh?'text-red-500':'text-orange-500'}`}>{risk}</span>
                       <div className={`ml-auto px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${alert.status==='dismissed'?'bg-rose-50 text-rose-500':'bg-blue-50 text-blue-500'}`}>
                         {alert.status || 'NEW'}
@@ -380,11 +441,11 @@ export default function AlertsPage({ liveAlerts = [] }) {
                     </div>
                     
                     <div className="text-[12px] text-slate-400 flex items-center gap-2 mb-3">
-                      <MapPin size={11}/> {alert.camera_id} <span className="text-slate-200">·</span> Riverside Plaza <span className="text-slate-200">·</span> {ago}
+                      <MapPin size={11}/> {alert.camera_id} <span className="text-slate-200">·</span> Main Entrance <span className="text-slate-200">·</span> {ago}
                     </div>
 
                     <p className="text-[12px] text-slate-500 leading-relaxed line-clamp-2">
-                      {isHigh ? 'Movement pattern consistent with stalking behavior. Subject followed target across zones.' : 'Moderate risk — consistent proximity and matching movement direction detected.'}
+                      {alert.explanation?.description || alert.explanation?.fused_explanation || (isHigh ? 'High severity incident detected by SentriX AI surveillance.' : 'Incident event recorded and packaged for review.')}
                     </p>
                   </div>
                 </div>

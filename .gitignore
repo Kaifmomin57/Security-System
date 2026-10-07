@@ -20,10 +20,14 @@ backend/.env
 *.engine
 
 # Generated Media & Logs
+backend/media/
 backend/media/clips/
 backend/media/snapshots/
 backend/media/reports/
 backend/media/reid_gallery/
+backend/media/gun_detection/
+backend/media/processed_results/
+backend/media/full_pipeline_results/
 
 # Frontend
 frontend/node_modules/

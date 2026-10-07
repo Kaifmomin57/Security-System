@@ -16,6 +16,8 @@ from ultralytics import YOLO
 logger = logging.getLogger(__name__)
 
 # ─── Classes relevant to SentryEye safety features only ─────────────────────
+# NOTE: Weapon classes (gun, knife) are handled EXCLUSIVELY by best.pt via
+# weapon_detector.py — do NOT add them here or you get duplicate detections.
 COCO_CLASSES_OF_INTEREST = {
     # Feature 1, 2, 3, 4: People & Vehicles
     0:  "person",
@@ -29,10 +31,9 @@ COCO_CLASSES_OF_INTEREST = {
     26: "handbag",
     28: "suitcase",
 
-    # Feature 5.1: Weapons & Tools
-    43: "knife",
-    76: "scissors",
-    34: "baseball bat",
+    # NOTE: knife (43), scissors (76), baseball bat (34) REMOVED from here.
+    # They are detected by best.pt (weapon_detector) with higher accuracy.
+    # Keeping them here caused duplicate/conflicting detections.
 }
 
 

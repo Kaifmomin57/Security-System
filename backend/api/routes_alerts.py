@@ -165,9 +165,11 @@ def delete_alert(event_id: str, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": event_id}
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+import os
 
 def _to_response(event: Event) -> AlertResponse:
+    snap_name = os.path.basename(event.snapshot_path) if event.snapshot_path else None
+    clip_name = os.path.basename(event.clip_path) if event.clip_path else None
     return AlertResponse(
         id=event.id,
         camera_id=event.camera_id,
@@ -177,8 +179,8 @@ def _to_response(event: Event) -> AlertResponse:
         severity=event.severity,
         status=event.status,
         track_ids=event.track_ids,
-        snapshot_url=f"/media/snapshots/{event.snapshot_path.split('/')[-1]}" if event.snapshot_path else None,
-        clip_url=f"/media/clips/{event.clip_path.split('/')[-1]}" if event.clip_path else None,
+        snapshot_url=f"/media/snapshots/{snap_name}" if snap_name else None,
+        clip_url=f"/media/clips/{clip_name}" if clip_name else None,
         clip_hash=event.clip_hash,
         explanation=event.explanation,
         timestamp=event.timestamp,

@@ -55,6 +55,18 @@ def _to_report_response(report: IncidentReport, event: Event) -> IncidentReportR
     )
 
 
+@router.get("", response_model=list[IncidentReportResponse])
+def list_reports(limit: int = Query(50, le=100), db: Session = Depends(get_db)):
+    """List all generated incident reports with associated event details."""
+    reports = db.query(IncidentReport).order_by(IncidentReport.generated_at.desc()).limit(limit).all()
+    out = []
+    for r in reports:
+        event = db.query(Event).filter(Event.id == r.event_id).first()
+        if event:
+            out.append(_to_report_response(r, event))
+    return out
+
+
 @router.get("/{event_id}", response_model=IncidentReportResponse)
 def get_incident_report(
     event_id: str,
