@@ -18,6 +18,7 @@ backend/.env
 *.pt
 *.onnx
 *.engine
+*.task
 
 # Generated Media & Logs
 backend/media/
