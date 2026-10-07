@@ -15,7 +15,6 @@ ENV/
 backend/.env
 
 # Large Models & Weights (Keep repo lightweight)
-*.pt
 *.onnx
 *.engine
 *.task
