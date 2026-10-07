@@ -11,6 +11,7 @@ Usage:
 import asyncio
 import logging
 import os
+import shutil
 import time
 import uuid
 from datetime import datetime, timezone
@@ -40,6 +41,7 @@ from alerts.trust_adjuster    import trust_adjuster
 from alerts.notifier_telegram import send_alert
 from evidence.hasher          import hash_file
 from privacy.face_blur        import FaceBlur
+from privacy.private_evidence import private_snapshot_path
 from storage.db               import (
     create_tables, get_session, Event, Camera,
     TrackClassification, UnaccompaniedEvent, AudioEvent,
@@ -48,7 +50,7 @@ from storage.db               import (
     ReidGallery, ReidMatch
 )
 from storage.clip_saver       import ClipSaver
-from api.main                 import pipeline_status
+from api.main                 import pipeline_status, frame_registry
 from api.websocket_manager    import ws_manager
 
 load_dotenv()
@@ -171,6 +173,8 @@ async def save_and_notify(
     clip_saver: ClipSaver,
     face_blur: FaceBlur | None,
     audio_detector: AudioDistressDetector | None = None,
+    captured_at: float | None = None,
+    event_camera_id: str = CAMERA_ID,
 ):
     """Save snapshot/clip, hash it, store DB record, perform audio-visual fusion, send Telegram alert."""
     db = get_session()
@@ -179,6 +183,27 @@ async def save_and_notify(
     try:
         severity = score_severity(result)
         metadata = dict(result.metadata) if result.metadata else {}
+        event_timestamp = (
+            datetime.fromtimestamp(captured_at, timezone.utc).replace(tzinfo=None)
+            if captured_at is not None
+            else datetime.utcnow()
+        )
+
+        # Track IDs can change when tracking reacquires subjects; prevent a
+        # second unresolved incident for the same rule on this camera.
+        duplicate = db.query(Event).filter(
+            Event.camera_id == event_camera_id,
+            Event.rule_type == result.rule_type,
+            Event.status.in_(("new", "acknowledged", "confirmed")),
+        ).first()
+        if duplicate:
+            logger.info(
+                "Suppressing duplicate incident for %s on %s: existing event %s",
+                result.rule_type,
+                event_camera_id,
+                duplicate.id,
+            )
+            return
 
         # ── Feature B: Multi-Modal Fusion Check ──────────────────────────────
         # Check if there is a recent distress audio event on this camera
@@ -210,12 +235,18 @@ async def save_and_notify(
 
         # Apply face blur to snapshot
         if face_blur and snapshot_path:
+            try:
+                original_path = private_snapshot_path(event_id)
+                os.makedirs(os.path.dirname(original_path), mode=0o700, exist_ok=True)
+                shutil.copy2(snapshot_path, original_path)
+            except (OSError, ValueError):
+                logger.exception("Could not preserve private original for event %s", event_id)
             face_blur.blur_image_file(snapshot_path)
 
         # Write DB event first (clip path filled after post-event recording)
         event = Event(
             id            = event_id,
-            camera_id     = CAMERA_ID,
+            camera_id     = event_camera_id,
             rule_type     = result.rule_type,
             confidence    = result.confidence,
             severity      = severity,
@@ -225,7 +256,7 @@ async def save_and_notify(
             clip_path     = "",
             clip_hash     = "",
             explanation   = metadata,
-            timestamp     = datetime.now(timezone.utc),
+            timestamp     = event_timestamp,
         )
         db.add(event)
 
@@ -237,7 +268,7 @@ async def save_and_notify(
                         track_id=tid,
                         stature_class="small",
                         confidence=metadata.get("stature_confidence", 0.8),
-                        camera_calib_ref=CAMERA_ID,
+                        camera_calib_ref=event_camera_id,
                     ))
                     db.add(UnaccompaniedEvent(
                         event_id=event_id,
@@ -265,7 +296,7 @@ async def save_and_notify(
                 ))
                 # Add follower to active Re-ID gallery for cross-camera correlation
                 if frame is not None and frame.size > 0:
-                    reid_engine.add_to_active_gallery(follower_id, CAMERA_ID, frame)
+                    reid_engine.add_to_active_gallery(follower_id, event_camera_id, frame)
             except Exception as e:
                 logger.debug(f"Could not write trailing event: {e}")
 
@@ -276,7 +307,7 @@ async def save_and_notify(
                     id=f"ges_{uuid.uuid4().hex[:8]}",
                     event_id=event_id,
                     track_id=result.track_ids[0] if result.track_ids else 0,
-                    camera_id=CAMERA_ID,
+                    camera_id=event_camera_id,
                     confidence=result.confidence,
                     gesture_type=metadata.get("gesture_type", "signal_for_help"),
                     snapshot_path=snapshot_path,
@@ -294,7 +325,7 @@ async def save_and_notify(
                     track_id=result.track_ids[0] if result.track_ids else None,
                     weapon_class=metadata.get("weapon_class", "weapon"),
                     confidence=result.confidence,
-                    camera_id=CAMERA_ID,
+                    camera_id=event_camera_id,
                     is_reviewed=False,
                     timestamp=datetime.now(timezone.utc),
                 ))
@@ -310,7 +341,7 @@ async def save_and_notify(
                     object_track_id=metadata.get("object_track_id", result.track_ids[0] if result.track_ids else 0),
                     object_class=metadata.get("object_class", "backpack"),
                     duration_unattended=metadata.get("duration_unattended_seconds", 0.0),
-                    camera_id=CAMERA_ID,
+                    camera_id=event_camera_id,
                     timestamp=datetime.now(timezone.utc),
                 ))
             except Exception as e:
@@ -322,13 +353,13 @@ async def save_and_notify(
                 db.add(TrafficViolation(
                     id=f"tv_{uuid.uuid4().hex[:8]}",
                     event_id=event_id,
-                    junction_id=CAMERA_ID,
+                    junction_id=event_camera_id,
                     violation_type=result.rule_type,
                     plate_number=metadata.get("plate_number"),
                     signal_state=metadata.get("signal_state"),
                     lane_id=metadata.get("lane_id"),
                     speed_estimate_kmh=metadata.get("speed_estimate_kmh"),
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=event_timestamp,
                 ))
             except Exception as e:
                 logger.debug(f"Could not write traffic violation: {e}")
@@ -344,7 +375,7 @@ async def save_and_notify(
                     plate_number=metadata.get("plate_number"),
                     collision_speed_drop=metadata.get("collision_speed_drop", 0.65),
                     fleeing_velocity=metadata.get("fleeing_velocity_px", 18.0),
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=event_timestamp,
                 ))
             except Exception as e:
                 logger.debug(f"Could not write collision event: {e}")
@@ -356,7 +387,7 @@ async def save_and_notify(
         dwell_time = metadata.get("dwell_time") or metadata.get("duration_alone_seconds")
         await send_alert(
             event_id    = event_id,
-            camera_id   = CAMERA_ID,
+            camera_id   = event_camera_id,
             camera_name = camera_name,
             rule_type   = result.rule_type,
             confidence  = result.confidence,
@@ -369,14 +400,14 @@ async def save_and_notify(
         # Push to dashboard via WebSocket
         await ws_manager.broadcast_new_alert({
             "id":          event_id,
-            "camera_id":   CAMERA_ID,
+            "camera_id":   event_camera_id,
             "rule_type":   result.rule_type,
             "confidence":  result.confidence,
             "severity":    severity,
             "status":      "new",
             "track_ids":   result.track_ids,
             "snapshot_url": f"/media/snapshots/{os.path.basename(snapshot_path)}" if snapshot_path else None,
-            "timestamp":   datetime.now(timezone.utc).isoformat(),
+            "timestamp":   event_timestamp.replace(tzinfo=timezone.utc).isoformat(),
             "explanation": metadata,
         })
 
@@ -388,21 +419,26 @@ async def save_and_notify(
         db.close()
 
 
-async def run_pipeline():
-    """Main async pipeline loop."""
+async def run_pipeline(camera_id: str = None, video_source: str = None, camera_name: str = None):
+    """Main async pipeline loop. Params override env-var globals for multi-camera use."""
+    # Allow per-instance overrides (for multi-camera mode)
+    _cam_id     = camera_id    or CAMERA_ID
+    _vid_src    = video_source or VIDEO_SOURCE
+    _cam_name   = camera_name  or CAMERA_NAME
+
     logger.info("=" * 60)
     logger.info(f"  SentryEye Pipeline Starting")
-    logger.info(f"  Camera : {CAMERA_ID} ({CAMERA_NAME})")
-    logger.info(f"  Source : {VIDEO_SOURCE}")
+    logger.info(f"  Camera : {_cam_id} ({_cam_name})")
+    logger.info(f"  Source : {_vid_src}")
     logger.info(f"  Model  : {YOLO_MODEL} on {DEVICE}")
     logger.info("=" * 60)
 
     # ── Init database ─────────────────────────────────────────────────────────
     create_tables()
     db = get_session()
-    cam = db.query(Camera).filter(Camera.id == CAMERA_ID).first()
+    cam = db.query(Camera).filter(Camera.id == _cam_id).first()
     if not cam:
-        db.add(Camera(id=CAMERA_ID, name=CAMERA_NAME, source_url=VIDEO_SOURCE, status="online"))
+        db.add(Camera(id=_cam_id, name=_cam_name, source_url=_vid_src, status="online"))
         db.commit()
     else:
         cam.status = "online"
@@ -410,11 +446,11 @@ async def run_pipeline():
     db.close()
 
     # ── Load config ───────────────────────────────────────────────────────────
-    cam_config = load_zones_config(CAMERA_ID)
+    cam_config = load_zones_config(_cam_id)
 
     # ── Init components ───────────────────────────────────────────────────────
     detector       = Detector(model_name=YOLO_MODEL, device=DEVICE, confidence=CONF_THRESH)
-    tracker        = Tracker(camera_id=CAMERA_ID)
+    tracker        = Tracker(camera_id=_cam_id)
     rules          = [
         LoiteringRule(),
         ZoneIntrusionRule(),
@@ -427,15 +463,14 @@ async def run_pipeline():
         HitAndRunRule(),            # Hit & Run Collision
     ]
     fusion         = FusionEngine(n_required=N_SMOOTH, m_window=M_SMOOTH, cooldown_secs=COOLDOWN)
-    clip_saver     = ClipSaver(output_dir=MEDIA_DIR, camera_id=CAMERA_ID)
+    clip_saver     = ClipSaver(output_dir=MEDIA_DIR, camera_id=_cam_id)
     face_blur      = FaceBlur() if FACE_BLUR_ON else None
-    
-    # Feature B: Audio Distress Detector on background thread
-    audio_detector = AudioDistressDetector(camera_id=CAMERA_ID)
+
+    audio_detector = AudioDistressDetector(camera_id=_cam_id)
     audio_detector.start()
 
     # ── Update pipeline status registry ───────────────────────────────────────
-    pipeline_status[CAMERA_ID] = {
+    pipeline_status[_cam_id] = {
         "status":       "running",
         "fps":          0.0,
         "started_at":   time.time(),
@@ -445,10 +480,8 @@ async def run_pipeline():
     # ── Stream loop ───────────────────────────────────────────────────────────
     fps_counter, fps_timer = 0, time.time()
     anpr_eval_frame_skip = 10  # Evaluate ANPR every 10 frames
-    last_alert_time = {}  # Tracks the last time each rule type fired an alert
-
-    with StreamReader(VIDEO_SOURCE, frame_skip=FRAME_SKIP,
-                      width=INPUT_W, height=INPUT_H, camera_id=CAMERA_ID) as reader:
+    with StreamReader(_vid_src, frame_skip=FRAME_SKIP,
+                      width=INPUT_W, height=INPUT_H, camera_id=_cam_id) as reader:
 
         for frame_idx, timestamp, frame in reader.stream():
 
@@ -482,7 +515,7 @@ async def run_pipeline():
                         anpr_res = anpr_engine.process_vehicle_track(
                             frame=frame,
                             bbox=trk.bbox,
-                            camera_id=CAMERA_ID,
+                            camera_id=_cam_id,
                             track_id=trk.track_id,
                         )
                         if anpr_res and anpr_res.get("matched"):
@@ -501,68 +534,83 @@ async def run_pipeline():
                                 }
                             )
                             asyncio.create_task(
-                                save_and_notify(wl_hit, frame.copy(), CAMERA_NAME, clip_saver, face_blur, audio_detector)
+                                save_and_notify(
+                                    wl_hit, frame.copy(), _cam_name, clip_saver, face_blur,
+                                    audio_detector, captured_at=timestamp, event_camera_id=_cam_id,
+                                )
                             )
 
             # ── Rule evaluation ───────────────────────────────────────────────
             eval_config = dict(cam_config)
             eval_config["current_frame"] = frame
             eval_config["raw_detections"] = all_detections
-            eval_config["camera_id"] = CAMERA_ID
+            eval_config["camera_id"] = _cam_id
 
             raw_results = []
             for rule in rules:
                 raw_results.extend(rule.evaluate(tracks, eval_config))
 
             # ── Temporal smoothing + fusion ───────────────────────────────────
-            confirmed = fusion.process(raw_results, CAMERA_ID)
+            already_temporal = [
+                result for result in raw_results
+                if result.rule_type == "possible_hit_and_run"
+            ]
+            confirmed = fusion.process(
+                [result for result in raw_results if result.rule_type != "possible_hit_and_run"],
+                _cam_id,
+            )
+            # Hit-and-run results already require a measured impact and an
+            # observed fleeing/stationary phase; don't require repeated frames.
+            confirmed.extend(already_temporal)
 
             # ── For each confirmed alert ──────────────────────────────────────
             active_alert_data = []
-            current_time = time.time()
             for result in confirmed:
                 # Trust adjuster (F18) — skip if dismiss rate too high
-                if trust_adjuster.should_suppress(CAMERA_ID, result.rule_type):
+                if trust_adjuster.should_suppress(_cam_id, result.rule_type):
                     continue
-
-                # Cooldown check to prevent duplicate spam (e.g., 20 seconds)
-                if current_time - last_alert_time.get(result.rule_type, 0) < 20.0:
-                    continue
-                last_alert_time[result.rule_type] = current_time
 
                 active_alert_data.append({
                     "track_ids": result.track_ids,
                     "rule_type": result.rule_type,
                 })
                 asyncio.create_task(
-                    save_and_notify(result, frame.copy(), CAMERA_NAME, clip_saver, face_blur, audio_detector)
+                    save_and_notify(
+                        result, frame.copy(), _cam_name, clip_saver, face_blur,
+                        audio_detector, captured_at=timestamp, event_camera_id=_cam_id,
+                    )
                 )
 
-            # ── Draw overlays and display (remove for headless / server mode) ─
-            annotated = draw_overlays(frame.copy(), tracks, active_alert_data, raw_detections=all_detections)
-            cv2.imshow(f"SentryEye — {CAMERA_NAME}", annotated)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                logger.info("User quit.")
-                break
+            # ── Draw overlays, push to stream, display ─────────────────────────
+            annotated = draw_overlays(
+                frame.copy(), tracks, active_alert_data, raw_detections=all_detections
+            )
+            # Resize for dashboard streaming to reduce lag
+            stream_frame = cv2.resize(annotated, (640, 360))
+            _, jpeg = cv2.imencode('.jpg', stream_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            frame_registry[_cam_id] = jpeg.tobytes()
+
+            # Remove cv2.imshow as it blocks the thread and lags the dashboard.
+            # You can now view everything smoothly on the dashboard.
 
             # ── FPS counter ───────────────────────────────────────────────────
             fps_counter += 1
             elapsed = time.time() - fps_timer
             if elapsed >= 5.0:
                 fps = fps_counter / elapsed
-                pipeline_status[CAMERA_ID]["fps"] = fps
-                pipeline_status[CAMERA_ID]["last_frame_at"] = timestamp
-                logger.info(f"[{CAMERA_ID}] FPS: {fps:.1f} | Tracks: {len(tracks)} | Frame: {frame_idx}")
+                pipeline_status[_cam_id]["fps"] = fps
+                pipeline_status[_cam_id]["last_frame_at"] = timestamp
+                logger.info(f"[{_cam_id}] FPS: {fps:.1f} | Tracks: {len(tracks)} | Frame: {frame_idx}")
                 fps_counter, fps_timer = 0, time.time()
 
-            # Yield to event loop so WebSocket tasks can run
-            await asyncio.sleep(0)
+            # Yield to event loop so WebSocket and other cameras can run
+            await asyncio.sleep(0.01)
 
     # Stop audio detector
     audio_detector.stop()
-    cv2.destroyAllWindows()
-    pipeline_status[CAMERA_ID]["status"] = "stopped"
-    logger.info("Pipeline stopped.")
+    frame_registry.pop(_cam_id, None)
+    pipeline_status[_cam_id]["status"] = "stopped"
+    logger.info(f"Pipeline stopped for {_cam_id}.")
 
 
 if __name__ == "__main__":

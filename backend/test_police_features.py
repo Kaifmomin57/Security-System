@@ -182,23 +182,18 @@ def run_tests():
 
     # ── TEST 6: Feature 6 - Hit-and-Run Detection ─────────────────────────────
     print("\n[6/6] Testing Feature 6: Hit-and-Run Collision & Fleeing Detection...")
-    hit_rule = HitAndRunRule(proximity_threshold_px=100.0, fleeing_speed_min_px=10.0)
+    hit_rule = HitAndRunRule()
+    vehicle_path = [(0.0, 0.0, 300.0), (1.0, 40.0, 300.0), (2.0, 80.0, 300.0), (3.0, 90.0, 300.0), (4.0, 130.0, 300.0)]
+    person_path = [(t, 90.0, 300.0) for t in range(5)]
 
-    # Frame 1 to 4: Approach & Impact at (300, 300) with speed dropping to 0
-    v_flee = MockTrack(10, "car", trajectory=[(0.0, 200.0, 300.0), (0.1, 250.0, 300.0), (0.2, 300.0, 300.0), (0.3, 300.0, 300.0)])
-    v_stat = MockTrack(20, "person", trajectory=[(0.0, 310.0, 300.0), (0.1, 305.0, 300.0), (0.2, 300.0, 300.0), (0.3, 300.0, 300.0)])
-    
-    # Simulate deceleration on impact (both stopped)
-    for _ in range(4):
-        hit_rule.evaluate([v_flee, v_stat], {})
+    res_hit = []
+    for frame in range(5):
+        vehicle = MockTrack(10, "car", trajectory=vehicle_path[:frame + 1])
+        person = MockTrack(20, "person", trajectory=person_path[:frame + 1])
+        res_hit.extend(hit_rule.evaluate([vehicle, person], {}))
 
-    # Post-collision: Car accelerates away to (580, 300), Person remains stationary at (300, 300)
-    v_flee_away = MockTrack(10, "car", trajectory=[(0.3, 300.0, 300.0), (0.4, 380.0, 300.0), (0.5, 480.0, 300.0), (0.6, 580.0, 300.0)])
-    v_stat_down = MockTrack(20, "person", trajectory=[(0.3, 300.0, 300.0), (0.4, 300.0, 300.0), (0.5, 300.0, 300.0), (0.6, 300.0, 300.0)])
-    
-    res_hit = hit_rule.evaluate([v_flee_away, v_stat_down], {})
     assert any(r.rule_type == "possible_hit_and_run" for r in res_hit)
-    print("  [PASS] Hit-and-Run Rule evaluated & triggered correctly (Fleeing Vehicle vs Stationary Subject).")
+    print("  [PASS] Hit-and-Run requires close contact, vehicle deceleration, and flight from a stationary subject.")
 
     db.close()
     print("\n" + "=" * 65)

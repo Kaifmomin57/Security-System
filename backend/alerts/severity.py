@@ -11,6 +11,7 @@ RULE_BASE_SEVERITY = {
     "intrusion":  "high",    # zone violation is immediately high
     "loitering":  "medium",
     "trailing":   "medium",
+    "possible_hit_and_run": "high",
     "crowd":      "low",
     "abandoned":  "medium",
 }

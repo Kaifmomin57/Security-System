@@ -19,13 +19,14 @@ logger = logging.getLogger(__name__)
 
 class LoiteringRule(BaseRule):
     """
-    Fires when a tracked person's centroid stays inside a zone polygon
-    for longer than the configured threshold.
+    Fires when a tracked person remains within a small stationary area inside
+    a configured zone for the configured threshold.
 
     Config keys expected per zone:
         polygon           : list of [x, y] points
         zone_id           : str
-        threshold_seconds : int  (default 60)
+        threshold_seconds : int  (default 10)
+        stationary_radius_px : int (default 30)
     """
 
     @property
@@ -34,25 +35,42 @@ class LoiteringRule(BaseRule):
 
     def evaluate(self, tracks: List[Any], config: Dict[str, Any]) -> List[RuleResult]:
         results = []
-        zones = config.get("zones", [])
+        camera_rule = config.get("loitering")
+        if camera_rule and camera_rule.get("enabled", True):
+            zones = [{
+                "id": camera_rule.get("zone_id", "camera-wide"),
+                "name": camera_rule.get("zone_name", "Camera-wide monitoring"),
+                "polygon": None,
+                "rules": [{
+                    "type": "loitering",
+                    "enabled": True,
+                    "threshold_seconds": camera_rule.get("threshold_seconds", 10),
+                    "stationary_radius_px": camera_rule.get("stationary_radius_px", 30),
+                }],
+            }]
+        else:
+            zones = config.get("zones", [])
 
         for zone in zones:
             loiter_cfg = self._get_rule_config(zone, "loitering")
             if not loiter_cfg or not loiter_cfg.get("enabled", True):
                 continue
 
-            threshold = loiter_cfg.get("threshold_seconds", 3)
+            threshold = loiter_cfg.get("threshold_seconds", 10)
+            stationary_radius = loiter_cfg.get("stationary_radius_px", 30)
             zone_id = zone.get("id", "unknown_zone")
             polygon_pts = zone.get("polygon", [])
 
-            if len(polygon_pts) < 3:
+            if polygon_pts is None:
+                zone_poly = None
+            elif len(polygon_pts) < 3:
                 continue
-
-            try:
-                zone_poly = Polygon(polygon_pts)
-            except Exception:
-                logger.warning(f"Invalid polygon for zone {zone_id}")
-                continue
+            else:
+                try:
+                    zone_poly = Polygon(polygon_pts)
+                except Exception:
+                    logger.warning(f"Invalid polygon for zone {zone_id}")
+                    continue
 
             for track in tracks:
                 if track.class_name != "person":
@@ -60,28 +78,34 @@ class LoiteringRule(BaseRule):
 
                 cx, cy = track.centroid
 
-                if not zone_poly.contains(Point(cx, cy)):
+                if zone_poly is not None and not zone_poly.contains(Point(cx, cy)):
                     continue
 
                 traj = list(getattr(track, "trajectory", []))
                 if len(traj) < 3:
                     continue
 
-                # Trajectory time duration
-                entry_time = traj[0].timestamp
-                last_time = traj[-1].timestamp
-                dwell = max(0.5, last_time - entry_time)
+                last_point = traj[-1]
+                stationary_points = []
+                for point in reversed(traj):
+                    if zone_poly is not None and not zone_poly.contains(Point(point.x, point.y)):
+                        break
+                    displacement = math.hypot(
+                        point.x - last_point.x,
+                        point.y - last_point.y,
+                    )
+                    if displacement > stationary_radius:
+                        break
+                    stationary_points.append(point)
 
-                # Check if person is lingering (not walking fast across scene)
-                p_start = (traj[0].x, traj[0].y)
-                p_end = (traj[-1].x, traj[-1].y)
-                net_disp = math.hypot(p_end[0] - p_start[0], p_end[1] - p_start[1])
-
-                # If they moved > 160px net in straight line, they are walking through, not loitering
-                if net_disp > 160.0:
+                if len(stationary_points) < 2:
                     continue
 
-                if dwell >= threshold or len(traj) >= 10:
+                dwell = max(
+                    0.0,
+                    last_point.timestamp - stationary_points[-1].timestamp,
+                )
+                if dwell >= threshold:
                     confidence = self._score_confidence(dwell, threshold)
                     results.append(
                         RuleResult(
@@ -94,6 +118,7 @@ class LoiteringRule(BaseRule):
                                 "zone_name": zone.get("name", zone_id),
                                 "dwell_time": round(dwell, 1),
                                 "threshold_seconds": threshold,
+                                "stationary_radius_px": stationary_radius,
                                 "centroid": [round(cx, 1), round(cy, 1)],
                                 "trajectory_points": [
                                     {"t": p.timestamp, "x": p.x, "y": p.y}

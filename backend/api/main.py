@@ -11,11 +11,12 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Dict
+from typing import AsyncGenerator, Dict
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.routes_alerts    import router as alerts_router
@@ -40,6 +41,10 @@ MEDIA_DIR = os.getenv("MEDIA_DIR", "./media")
 # ─── Pipeline status registry (updated by pipeline.py) ────────────────────────
 # camera_id -> {status, fps, uptime_seconds, last_frame_at}
 pipeline_status: Dict[str, dict] = {}
+
+# ─── Frame registry for MJPEG streaming ──────────────────────────────────────
+# camera_id -> latest JPEG bytes
+frame_registry: Dict[str, bytes] = {}
 
 
 @asynccontextmanager
@@ -138,6 +143,22 @@ def get_events(
         return [_to_response(e) for e in events]
     finally:
         db.close()
+
+
+@app.get("/api/v1/cameras/{camera_id}/stream")
+async def mjpeg_stream(camera_id: str):
+    """MJPEG stream for a camera — pushes frames from the pipeline's frame_registry."""
+    async def generate() -> AsyncGenerator[bytes, None]:
+        while True:
+            frame = frame_registry.get(camera_id)
+            if frame:
+                yield (b"--frame\r\n"
+                       b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
+            await asyncio.sleep(0.05)  # ~20 fps cap
+    return StreamingResponse(
+        generate(),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
 
 
 @app.get("/", tags=["root"])

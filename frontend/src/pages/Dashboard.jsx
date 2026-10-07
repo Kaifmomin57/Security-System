@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Bell, Camera, Activity, TrendingUp, AlertTriangle, Play, Maximize, Map, Cpu, Shield } from 'lucide-react'
+import { Camera, AlertTriangle, Play, Shield, WifiOff } from 'lucide-react'
 import axios from 'axios'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -17,6 +17,22 @@ const RULE_LABELS = {
   possible_hit_and_run: 'Possible Hit & Run',
   watchlist_vehicle_match: 'Watchlist Match',
 }
+
+// All 12 camera slots in the system
+const ALL_CAMERAS = [
+  { id: 'cam_01', name: 'MAIN ENTRANCE' },
+  { id: 'cam_02', name: 'REAR EXIT' },
+  { id: 'cam_03', name: 'PARKING LOT A' },
+  { id: 'cam_04', name: 'PARKING LOT B' },
+  { id: 'cam_05', name: 'LOBBY' },
+  { id: 'cam_06', name: 'STAIRWELL N' },
+  { id: 'cam_07', name: 'ROOF ACCESS' },
+  { id: 'cam_08', name: 'ALLEY WEST' },
+  { id: 'cam_09', name: 'SIDE GATE' },
+  { id: 'cam_10', name: 'WAREHOUSE' },
+  { id: 'cam_11', name: 'CORRIDOR 1' },
+  { id: 'cam_12', name: 'CORRIDOR 2' },
+]
 
 function StatCard({ label, value, color }) {
   return (
@@ -56,33 +72,54 @@ function ActiveThreatCard({ alert, onClick }) {
   )
 }
 
-function CameraFeed({ id, name, isMock = false }) {
+function CameraFeed({ id, name, isLive }) {
+  const [imgError, setImgError] = useState(false)
+  const streamUrl = `${API}/cameras/${id}/stream`
+
+  // Reset error state when live status changes
+  useEffect(() => { setImgError(false) }, [isLive])
+
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden', background: 'var(--bg-secondary)', position: 'relative' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: 'var(--brand-navy)', color: 'white', fontSize: '0.65rem', fontWeight: 600, letterSpacing: '1px' }}>
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden', background: '#0a0f1a', position: 'relative' }}>
+      {/* Header bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 10px', background: 'var(--brand-navy)', color: 'white', fontSize: '0.62rem', fontWeight: 600, letterSpacing: '1px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {name} <span style={{ color: '#94a3b8' }}>• {id}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--alert-ok)' }}>
-          <span className="ws-dot" style={{ width: 5, height: 5 }} /> LIVE
-        </div>
-      </div>
-      <div style={{ aspectRatio: '16/9', background: '#0f172a', position: 'relative' }}>
-        {isMock ? (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#334155', flexDirection: 'column', gap: 8 }}>
-            <Camera size={24} />
-            <span style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Feed Active</span>
+        {isLive && !imgError ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#22c55e' }}>
+            <span className="ws-dot" style={{ width: 5, height: 5 }} /> LIVE
           </div>
         ) : (
-          <img src={`http://localhost:8000/api/v1/cameras/${id}/stream`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#64748b' }}>
+            <WifiOff size={10} /> OFFLINE
+          </div>
         )}
-        <div style={{ display: 'none', width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, alignItems: 'center', justifyContent: 'center', color: '#334155', flexDirection: 'column', gap: 8 }}>
-            <Camera size={24} />
-            <span style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Signal Lost</span>
-        </div>
-        
-        {/* Overlay scanning effect */}
-        <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.05) 2px, rgba(0,0,0,0.05) 4px)', pointerEvents: 'none' }} />
+      </div>
+
+      {/* Video area */}
+      <div style={{ aspectRatio: '16/9', background: '#050a14', position: 'relative', overflow: 'hidden' }}>
+        {isLive && !imgError ? (
+          <img
+            src={streamUrl}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            onError={() => setImgError(true)}
+            alt={`Live feed ${id}`}
+          />
+        ) : (
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6 }}>
+            {/* Scanlines */}
+            <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255,255,255,0.015) 3px, rgba(255,255,255,0.015) 4px)', pointerEvents: 'none' }} />
+            {/* Static noise */}
+            <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px)', backgroundSize: '6px 6px', pointerEvents: 'none' }} />
+            <Camera size={18} style={{ color: '#1e293b', position: 'relative' }} />
+            <span style={{ fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '2px', color: '#1e293b', fontWeight: 700, position: 'relative' }}>NO SIGNAL</span>
+          </div>
+        )}
+        {/* Scanlines overlay on live */}
+        {isLive && !imgError && (
+          <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.04) 2px, rgba(0,0,0,0.04) 4px)', pointerEvents: 'none' }} />
+        )}
       </div>
     </div>
   )
@@ -91,6 +128,7 @@ function CameraFeed({ id, name, isMock = false }) {
 export default function Dashboard({ liveAlerts }) {
   const [dbAlerts, setDbAlerts] = useState([])
   const [gridSize, setGridSize] = useState('2x2')
+  const [activeCamIds, setActiveCamIds] = useState(new Set())
 
   const fetchAlerts = async () => {
     try {
@@ -99,16 +137,33 @@ export default function Dashboard({ liveAlerts }) {
     } catch (_) {}
   }
 
+  const fetchActiveCams = async () => {
+    try {
+      const r = await axios.get(`${API}/health`)
+      const active = new Set(
+        (r.data.cameras || [])
+          .filter(c => c.status === 'running' || c.fps > 0)
+          .map(c => c.camera_id)
+      )
+      setActiveCamIds(active)
+    } catch (_) {}
+  }
+
   useEffect(() => {
     fetchAlerts()
+    fetchActiveCams()
     const t1 = setInterval(fetchAlerts, 10000)
-    return () => clearInterval(t1)
+    const t2 = setInterval(fetchActiveCams, 3000)
+    return () => { clearInterval(t1); clearInterval(t2) }
   }, [])
 
   const allAlerts = [
     ...liveAlerts.filter(la => !dbAlerts.find(d => d.id === la.id)),
     ...dbAlerts,
-  ].slice(0, 3) // Only show top 3 on dashboard
+  ].slice(0, 3)
+
+  const camCount = gridSize === '1x1' ? 1 : gridSize === '2x2' ? 4 : 16
+  const displayedCams = ALL_CAMERAS.slice(0, camCount)
 
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
@@ -120,58 +175,58 @@ export default function Dashboard({ liveAlerts }) {
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--alert-ok)', fontWeight: 600, marginLeft: 12 }}>
               <span className="ws-dot" style={{ width: 6, height: 6 }} /> LIVE
             </span>
+            <span style={{ color: '#22c55e', fontWeight: 600, marginLeft: 8, fontSize: '0.75rem' }}>
+              {activeCamIds.size} / {ALL_CAMERAS.length} CAMERAS ONLINE
+            </span>
           </div>
         </div>
         <div style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
           <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Good evening, Control Room</div>
-          AI monitoring 12 camera feeds across 5 operational zones.
+          AI monitoring {ALL_CAMERAS.length} camera slots across 5 operational zones.
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 24, marginBottom: 24 }}>
-        {/* Left Column: Live Video Grid */}
+        {/* Left: Camera Grid */}
         <div className="card" style={{ padding: 20 }}>
           <div className="card-header" style={{ marginBottom: 16, paddingBottom: 12 }}>
             <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Play size={14} /> LIVE SURVEILLANCE
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button 
-                className="btn btn-ghost" 
-                style={{ padding: '4px 10px', background: 'var(--bg-secondary)', fontWeight: 700 }} 
-                onClick={() => {
-                  if (gridSize === '1x1') setGridSize('2x2');
-                  else if (gridSize === '2x2') setGridSize('4x4');
-                  else setGridSize('1x1');
-                }}
-              >
-                {gridSize === '1x1' ? '▣ 1×1' : gridSize === '2x2' ? '▦ 2×2' : '▦ 4×4'}
-              </button>
-            </div>
+            <button
+              className="btn btn-ghost"
+              style={{ padding: '4px 10px', background: 'var(--bg-secondary)', fontWeight: 700 }}
+              onClick={() => {
+                if (gridSize === '1x1') setGridSize('2x2')
+                else if (gridSize === '2x2') setGridSize('4x4')
+                else setGridSize('1x1')
+              }}
+            >
+              {gridSize === '1x1' ? '▣ 1×1' : gridSize === '2x2' ? '▦ 2×2' : '▦ 4×4'}
+            </button>
           </div>
-          
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: gridSize === '1x1' ? '1fr' : gridSize === '2x2' ? '1fr 1fr' : 'repeat(4, 1fr)', 
-            gap: 16 
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: gridSize === '1x1' ? '1fr' : gridSize === '2x2' ? '1fr 1fr' : 'repeat(4, 1fr)',
+            gap: 10
           }}>
-            {Array.from({ length: gridSize === '1x1' ? 1 : gridSize === '2x2' ? 4 : 16 }).map((_, i) => (
-              <CameraFeed key={i} id={`cam_${String(i+1).padStart(2, '0')}`} name={i === 0 ? "MAIN ENTRANCE" : `CAMERA ${String(i+1).padStart(2, '0')}`} isMock={i !== 0} />
+            {displayedCams.map(cam => (
+              <CameraFeed key={cam.id} id={cam.id} name={cam.name} isLive={activeCamIds.has(cam.id)} />
             ))}
           </div>
         </div>
 
-        {/* Right Column: Active Threats */}
+        {/* Right: Active Threats */}
         <div className="card" style={{ padding: 20, background: 'var(--bg-secondary)' }}>
           <div className="card-header" style={{ marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
             <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--alert-high)' }}>
               <AlertTriangle size={14} /> ACTIVE THREATS
             </div>
           </div>
-          
           <div className="alert-feed" style={{ marginTop: 8 }}>
             {allAlerts.length > 0 ? (
-              allAlerts.map(a => <ActiveThreatCard key={a.id} alert={a} onClick={() => window.location.href='/alerts'} />)
+              allAlerts.map(a => <ActiveThreatCard key={a.id} alert={a} onClick={() => window.location.href = '/alerts'} />)
             ) : (
               <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
                 <Shield size={24} style={{ opacity: 0.3, margin: '0 auto 8px' }} />
@@ -182,15 +237,13 @@ export default function Dashboard({ liveAlerts }) {
         </div>
       </div>
 
-      {/* Stats Row */}
+      {/* Stats */}
       <div className="stats-grid" style={{ gap: 24, marginBottom: 24 }}>
-        <StatCard label="CAMERAS" value="12" color="blue" />
-        <StatCard label="ACTIVE THREATS" value="2" color="red" />
+        <StatCard label="CAMERAS ONLINE" value={`${activeCamIds.size}/${ALL_CAMERAS.length}`} color="blue" />
+        <StatCard label="ACTIVE THREATS" value={allAlerts.length} color="red" />
         <StatCard label="AVG RESPONSE" value="1:42" color="orange" />
         <StatCard label="AI HEALTH" value="98.7%" color="green" />
       </div>
-
-
     </div>
   )
 }

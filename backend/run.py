@@ -1,64 +1,96 @@
 """
 run.py
 ───────
-Starts both the FastAPI server AND the pipeline in parallel.
-Run this single script to launch the full SentryEye system.
+Starts FastAPI + one or more pipeline instances in the SAME process/event loop
+so that frame_registry and pipeline_status are shared in memory.
 
 Usage:
-    python run.py
+    python run.py              # interactive selector (single cam)
+    python run.py 3            # cam_01 = video3_alley.mp4
+    python run.py 3 0          # cam_01 = video3_alley.mp4  +  cam_02 = webcam
+    python run.py 1 3          # cam_01 = video1  +  cam_02 = video3
+    python run.py 0            # cam_01 = webcam only
 """
 
 import asyncio
 import logging
-import subprocess
+import os
 import sys
-import threading
+
+import uvicorn
 
 logger = logging.getLogger("sentryeye.run")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+VIDEO_MAP = {
+    "1": "./media/video1_loitering.mp4",
+    "2": "./media/video2_traffic.mp4",
+    "3": "./media/video3_alley.mp4",
+    "0": "0",       # Still keep 0 as alias to index 0
+    "cam": "0",
+    "webcam": "0",
+    "c0": "0",      # Laptop webcam usually
+    "c1": "1",      # External USB webcam usually
+    "c2": "2",
+}
 
-def start_api_server():
-    """Launch FastAPI server in a subprocess."""
-    logger.info("Starting FastAPI server on http://localhost:8000 ...")
-    subprocess.run([
-        sys.executable, "-m", "uvicorn",
-        "api.main:app",
-        "--host", "0.0.0.0",
-        "--port", "8000",
-        "--reload",
-    ])
+CAMERA_NAMES = {
+    "cam_01": "Main Entrance",
+    "cam_02": "Secondary Camera",
+    "cam_03": "Camera 03",
+    "cam_04": "Camera 04",
+}
+
+def resolve_source(arg: str) -> str:
+    """Map a short arg (1/2/3/c0/c1) or a raw path/URL to a video source."""
+    return VIDEO_MAP.get(arg.strip().lower(), arg)
 
 
-async def start_pipeline():
-    """Run the detection pipeline."""
+async def main(sources: list[str]):
     from pipeline import run_pipeline
-    await run_pipeline()
+
+    # Set primary VIDEO_SOURCE env for backward compat
+    os.environ["VIDEO_SOURCE"] = sources[0]
+
+    # Build in-process uvicorn server (no --reload so frame_registry is shared)
+    config = uvicorn.Config(
+        "api.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False,
+        log_level="warning",
+    )
+    server = uvicorn.Server(config)
+    logger.info("Starting FastAPI server on http://localhost:8000 ...")
+
+    # Build one pipeline coroutine per source
+    pipeline_tasks = []
+    for idx, src in enumerate(sources):
+        cam_id   = f"cam_{str(idx + 1).zfill(2)}"
+        cam_name = CAMERA_NAMES.get(cam_id, f"Camera {idx + 1:02d}")
+        logger.info(f"  [{cam_id}] → {src}")
+        pipeline_tasks.append(
+            run_pipeline(camera_id=cam_id, video_source=src, camera_name=cam_name)
+        )
+
+    # Give uvicorn a moment to bind the port before pipelines start
+    async def delayed_pipelines():
+        await asyncio.sleep(3)
+        await asyncio.gather(*pipeline_tasks)
+
+    # Run API server + all pipelines concurrently
+    await asyncio.gather(server.serve(), delayed_pipelines())
 
 
 if __name__ == "__main__":
-    import os
+    sources = []
 
-    VIDEO_MAP = {
-        "1": "./media/video1_loitering.mp4",
-        "2": "./media/video2_traffic.mp4",
-        "3": "./media/video3_alley.mp4",
-        "0": "0",
-        "cam": "0",
-        "webcam": "0",
-    }
-
-    selected_source = None
-
-    # Check CLI arguments
     if len(sys.argv) > 1:
-        arg = sys.argv[1].strip().lower()
-        if arg in VIDEO_MAP:
-            selected_source = VIDEO_MAP[arg]
-        else:
-            selected_source = sys.argv[1] # custom path
+        # Accept 1 or more source args: python run.py 3 0
+        for arg in sys.argv[1:]:
+            sources.append(resolve_source(arg))
     else:
-        # Interactive prompt
+        # Interactive selector
         print("\n" + "=" * 55)
         print("    🎥  SENTRYEYE — LIVE DEMONSTRATION SELECTOR")
         print("=" * 55)
@@ -67,24 +99,23 @@ if __name__ == "__main__":
         print("  [3] Video 3 : Alleyway CCTV (Suspicious Activity)")
         print("  [0] Webcam  : Live Laptop Camera")
         print("=" * 55)
+        print("  TIP: You can enter multiple sources, e.g.  3 0")
+        print("=" * 55)
         try:
-            choice = input("Enter choice (1-3, 0) [Default: 1]: ").strip()
+            raw = input("Enter choice(s) [Default: 1]: ").strip()
         except (KeyboardInterrupt, EOFError):
-            choice = "1"
-        if not choice:
-            choice = "1"
-        selected_source = VIDEO_MAP.get(choice, VIDEO_MAP["1"])
+            raw = "1"
+        if not raw:
+            raw = "1"
+        for token in raw.split():
+            sources.append(resolve_source(token))
 
-    os.environ["VIDEO_SOURCE"] = selected_source
-    logger.info(f"Selected Video Source: {selected_source}")
+    if not sources:
+        sources = ["./media/video1_loitering.mp4"]
 
-    # Start API server in a background thread
-    api_thread = threading.Thread(target=start_api_server, daemon=True)
-    api_thread.start()
+    print(f"\n▶  Starting {len(sources)} camera(s):")
+    for i, s in enumerate(sources):
+        print(f"   cam_{i+1:02d} → {s}")
+    print()
 
-    # Brief pause to let the server bind
-    import time
-    time.sleep(2)
-
-    logger.info("Starting detection pipeline ...")
-    asyncio.run(start_pipeline())
+    asyncio.run(main(sources))

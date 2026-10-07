@@ -3,6 +3,12 @@ cameras:
     name: Main Entrance
     source: ./media/test_cctv.mp4   # replace with RTSP URL for live camera
 
+    loitering:
+      enabled: true
+      threshold_seconds: 10
+      stationary_radius_px: 30
+      zone_name: Camera-wide stationary detection
+
     zones:
       - id: zone_entrance_gate
         name: Entry Gate (Stationary Spot)
@@ -14,7 +20,8 @@ cameras:
           - [60,  480]
         rules:
           - type: loitering
-            threshold_seconds: 5    # fire after 5s standing still in this tiny spot
+            threshold_seconds: 10   # report after 10s standing still in this zone
+            stationary_radius_px: 30
             enabled: true
           - type: intrusion
             active_hours: "22:00-06:00"
@@ -30,7 +37,8 @@ cameras:
           - [440, 220]
         rules:
           - type: loitering
-            threshold_seconds: 5
+            threshold_seconds: 10
+            stationary_radius_px: 30
             enabled: true
           - type: crowd
             max_persons: 3

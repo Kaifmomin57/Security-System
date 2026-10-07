@@ -32,7 +32,25 @@ export default function AlertsPage({ liveAlerts = [] }) {
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState(null)
   const [updating, setUpdating] = useState(false)
+  const [unblurredSnapshot, setUnblurredSnapshot] = useState(null)
+  const [showUnblurredSnapshot, setShowUnblurredSnapshot] = useState(false)
   const [selectedAlertIds, setSelectedAlertIds] = useState(new Set())
+  const [hideMocks, setHideMocksState] = useState(() => localStorage.getItem('sentrix_hide_mocks') === 'true')
+
+  useEffect(() => () => {
+    if (unblurredSnapshot) URL.revokeObjectURL(unblurredSnapshot.url)
+  }, [unblurredSnapshot])
+
+  useEffect(() => {
+    setUnblurredSnapshot(null)
+    setShowUnblurredSnapshot(false)
+  }, [selected?.id])
+
+  const setHideMocks = (val) => {
+    setHideMocksState(val)
+    if (val) localStorage.setItem('sentrix_hide_mocks', 'true')
+    else localStorage.removeItem('sentrix_hide_mocks')
+  }
 
   const fetchAlerts = async () => {
     try {
@@ -51,6 +69,12 @@ export default function AlertsPage({ liveAlerts = [] }) {
     const interval = setInterval(fetchAlerts, 2500)
     return () => clearInterval(interval)
   }, [filter, liveAlerts])
+
+  // Poll for new alerts every 10 seconds so incidents survive page reload
+  useEffect(() => {
+    const interval = setInterval(fetchAlerts, 10000)
+    return () => clearInterval(interval)
+  }, [])
 
   const updateAlert = async (id, status) => {
     setUpdating(true)
@@ -77,9 +101,11 @@ export default function AlertsPage({ liveAlerts = [] }) {
   const handleDelete = async (eventId) => {
     if (!window.confirm('Are you sure you want to permanently delete this incident?')) return;
     try {
-      if (!eventId.startsWith('mock')) {
-        await axios.delete(`${API}/alerts/${eventId}`);
+      if (eventId.startsWith('mock')) {
+        setHideMocks(true);
+        return;
       }
+      await axios.delete(`${API}/alerts/${eventId}`);
       setAlerts(prev => prev.filter(a => a.id !== eventId));
       if (selected?.id === eventId) setSelected(null);
       
@@ -103,6 +129,8 @@ export default function AlertsPage({ liveAlerts = [] }) {
           await axios.delete(`${API}/alerts/${id}`);
         }
       }));
+      const hasMock = ids.some(id => id.startsWith('mock'));
+      if (hasMock) setHideMocks(true);
       setAlerts(prev => prev.filter(a => !selectedAlertIds.has(a.id)));
       if (selected && selectedAlertIds.has(selected.id)) setSelected(null);
       setSelectedAlertIds(new Set());
@@ -110,6 +138,58 @@ export default function AlertsPage({ liveAlerts = [] }) {
       console.error('Failed to bulk delete:', err);
     } finally {
       setUpdating(false);
+    }
+  }
+
+  const handleDeleteAll = async () => {
+    if (!window.confirm('Are you sure you want to permanently delete ALL incidents? This cannot be undone.')) return;
+    setUpdating(true);
+    try {
+      await axios.delete(`${API}/alerts`);
+      setAlerts([]);
+      setSelected(null);
+      setSelectedAlertIds(new Set());
+      // Only hide mocks, not real alerts that may arrive later
+      setHideMocks(true);
+    } catch (err) {
+      console.error('Failed to delete all alerts:', err);
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  const toggleUnblurredSnapshot = async () => {
+    if (showUnblurredSnapshot) {
+      setShowUnblurredSnapshot(false)
+      return
+    }
+    if (unblurredSnapshot?.eventId === selected.id) {
+      setShowUnblurredSnapshot(true)
+      return
+    }
+
+    const adminKey = window.prompt('Enter the admin key to view the unblurred snapshot:')
+    if (!adminKey) return
+
+    try {
+      const response = await axios.get(`${API}/alerts/${selected.id}/unblurred-snapshot`, {
+        headers: { 'X-Admin-Key': adminKey },
+        responseType: 'blob'
+      })
+      const url = URL.createObjectURL(response.data)
+      setUnblurredSnapshot({ eventId: selected.id, url })
+      setShowUnblurredSnapshot(true)
+    } catch (err) {
+      let message = 'Could not load unblurred snapshot.'
+      if (err.response?.data instanceof Blob) {
+        const responseText = await err.response.data.text()
+        try {
+          message = JSON.parse(responseText).detail || message
+        } catch {
+          message = responseText || message
+        }
+      }
+      window.alert(message)
     }
   }
 
@@ -130,10 +210,17 @@ export default function AlertsPage({ liveAlerts = [] }) {
     window.open(`${API}/reports/${eventId}/download`, '_blank')
   }
 
+  // Merge live + db alerts, deduplicate by ID (db takes priority)
+  // Real DB alerts always show; hideMocks only suppresses hardcoded mock cards
+  const seen = new Set()
   const allAlerts = [
-    ...liveAlerts.filter(la => !alerts.find(a => a.id === la.id)),
-    ...alerts
-  ]
+    ...alerts,
+    ...liveAlerts.filter(la => !alerts.find(a => a.id === la.id))
+  ].filter(a => {
+    if (seen.has(a.id)) return false
+    seen.add(a.id)
+    return true
+  })
 
   const getRiskScore = (conf) => Math.round(conf * 100)
 
@@ -155,8 +242,13 @@ export default function AlertsPage({ liveAlerts = [] }) {
     const riskScore = getRiskScore(selected.confidence)
     const severityColor = selected.severity === 'high' ? '#ef4444' : selected.severity === 'medium' ? '#f59e0b' : '#3b82f6'
     const timeDetected = new Date(selected.timestamp)
+    const incidentDescription = selected.explanation?.description
+      || `${RULE_LABELS[selected.rule_type] || selected.rule_type} incident recorded for ${selected.camera_id}.`
 
-    const snapshotImg = getMediaUrl(selected.snapshot_url) || "https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=900&h=560&fit=crop"
+    const blurredSnapshotImg = getMediaUrl(selected.snapshot_url) || "https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=900&h=560&fit=crop"
+    const snapshotImg = showUnblurredSnapshot && unblurredSnapshot?.eventId === selected.id
+      ? unblurredSnapshot.url
+      : blurredSnapshotImg
     const clipVid = getMediaUrl(selected.clip_url || selected.clip_path)
 
     const slides = [
@@ -196,6 +288,10 @@ export default function AlertsPage({ liveAlerts = [] }) {
       whyFlaggedReasons.push(`Inter-person distance remained consistently below threshold.`)
       whyFlaggedReasons.push(`Movement vector correlation confirmed (directional alignment).`)
       whyFlaggedReasons.push(`Follower automatically added to Cross-Camera Re-ID gallery.`)
+    } else if (selected.rule_type === 'possible_hit_and_run') {
+      whyFlaggedReasons.push(incidentDescription)
+      whyFlaggedReasons.push(`Vehicle track: #${selected.explanation?.track_id_fleeing ?? 'unknown'} (${selected.explanation?.fleeing_class || 'vehicle'}).`)
+      whyFlaggedReasons.push(`Other involved track: #${selected.explanation?.track_id_stationary ?? 'unknown'} (${selected.explanation?.victim_class || 'unknown'}); observed for ${selected.explanation?.observation_seconds ?? 'unknown'} seconds after contact.`)
     } else if (selected.rule_type === 'abandoned_object') {
       whyFlaggedReasons.push(`Unattended luggage/bag left stationary without owner nearby.`)
       whyFlaggedReasons.push(`Dwell timer exceeded unattended safety threshold.`)
@@ -237,6 +333,15 @@ export default function AlertsPage({ liveAlerts = [] }) {
         <div className="grid grid-cols-[1fr_380px] gap-6">
           <div className="flex flex-col gap-6">
             <div className="overflow-hidden relative">
+              <div className="flex justify-end mb-3">
+                <button
+                  className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={toggleUnblurredSnapshot}
+                  disabled={!selected.snapshot_url}
+                >
+                  {showUnblurredSnapshot ? 'Show blurred face' : 'Unblur face (admin)'}
+                </button>
+              </div>
               <CardDeckCarousel
                 height={420}
                 cardWidth="min(90%, 380px)"
@@ -364,15 +469,24 @@ export default function AlertsPage({ liveAlerts = [] }) {
           <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-1">INCIDENT INTELLIGENCE</h1>
           <p className="text-slate-500 font-medium text-sm">Real-time incident detection, evidence packaging, and response orchestration</p>
         </div>
-        {selectedAlertIds.size > 0 && (
+        <div className="flex items-center gap-3">
+          {selectedAlertIds.size > 0 && (
+            <button
+              className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 shadow-sm transition-colors"
+              onClick={handleBulkDelete}
+              disabled={updating}
+            >
+              <Trash2 size={16} /> DELETE {selectedAlertIds.size} SELECTED
+            </button>
+          )}
           <button 
-            className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 shadow-sm transition-colors"
-            onClick={handleBulkDelete}
-            disabled={updating}
+            className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 shadow-sm transition-colors"
+            onClick={handleDeleteAll}
+            disabled={updating || allAlerts.length === 0}
           >
-            <Trash2 size={16} /> DELETE {selectedAlertIds.size} SELECTED
+            <Trash2 size={16} /> DELETE ALL
           </button>
-        )}
+        </div>
       </div>
 
       {/* Top Stat Cards Removed by request */}
@@ -384,8 +498,19 @@ export default function AlertsPage({ liveAlerts = [] }) {
         {/* Incident List */}
         <div className="flex flex-col gap-6">
           
-          {/* FAKE CARDS TO MATCH SCREENSHOT IF API EMPTY, ELSE MAP OVER ALERTS */}
-          {(allAlerts.length === 0 ? [
+          {/* Incident List or Empty State */}
+          {allAlerts.length === 0 && hideMocks ? (
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center mb-4">
+                <ShieldCheck size={32} className="text-emerald-500" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-700 mb-1">All Clear</h3>
+              <p className="text-sm text-slate-400 mb-4">No incidents on record. The system is actively monitoring.</p>
+              <button className="text-xs text-blue-500 hover:underline" onClick={() => setHideMocks(false)}>
+                Show example incidents
+              </button>
+            </div>
+          ) : (allAlerts.length === 0 && !hideMocks ? [
             { id: 'mock1', severity: 'high', rule_type: 'trailing', camera_id: 'cam_01', timestamp: new Date(Date.now() - 10*3600*1000).toISOString(), confidence: 1.0, status: 'dismissed' },
             { id: 'mock2', severity: 'medium', rule_type: 'trailing', camera_id: 'cam_01', timestamp: new Date(Date.now() - 10*3600*1000).toISOString(), confidence: 0.53, status: 'new' }
           ] : allAlerts).map(alert => {
@@ -410,7 +535,18 @@ export default function AlertsPage({ liveAlerts = [] }) {
                   
                   {/* Video / Snapshot Thumbnail */}
                   <div className="relative w-full sm:w-[220px] h-[140px] bg-slate-900 rounded-lg overflow-hidden shrink-0 group">
-                    {getMediaUrl(alert.snapshot_url) ? (
+                    {getMediaUrl(alert.clip_url || alert.clip_path) ? (
+                      <video
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        poster={getMediaUrl(alert.snapshot_url) || undefined}
+                        className="w-full h-full object-cover opacity-80"
+                      >
+                        <source src={getMediaUrl(alert.clip_url || alert.clip_path)} type="video/mp4" />
+                      </video>
+                    ) : getMediaUrl(alert.snapshot_url) ? (
                       <img 
                         src={getMediaUrl(alert.snapshot_url)} 
                         alt="Incident Snapshot" 
@@ -445,7 +581,13 @@ export default function AlertsPage({ liveAlerts = [] }) {
                     </div>
 
                     <p className="text-[12px] text-slate-500 leading-relaxed line-clamp-2">
-                      {alert.explanation?.description || alert.explanation?.fused_explanation || (isHigh ? 'High severity incident detected by SentriX AI surveillance.' : 'Incident event recorded and packaged for review.')}
+                      {alert.explanation?.description || alert.explanation?.fused_explanation || (
+                        alert.rule_type === 'possible_hit_and_run'
+                          ? 'Possible collision detected; vehicle fled while the other involved track remained at the scene.'
+                          : alert.rule_type === 'trailing'
+                            ? 'Movement pattern consistent with trailing behavior.'
+                            : `${RULE_LABELS[alert.rule_type] || 'Incident'} detected.`
+                      )}
                     </p>
                   </div>
                 </div>
